@@ -1,0 +1,6 @@
+﻿{
+    "environment":  "isolated Windows process without provider credentials",
+    "command":  "npm test",
+    "test_home":  "C:\\Users\\11025\\AppData\\Local\\Temp\\rpi-pi-test-6ddae029-1bb9-4ac0-b88b-05b0052a15af",
+    "exit_code":  1
+}

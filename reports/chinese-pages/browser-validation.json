@@ -1,0 +1,278 @@
+{
+  "generated_at": "2026-10-22T17:24:48.379Z",
+  "base": "http://127.0.0.1:374",
+  "checks": [
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/index.html",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/docs",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/docs.html",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/plan",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/plan.html",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/plan.js",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/plan.css",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/docs.js",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/docs.css",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/documents-data.js",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/app.js",
+      "passed": true
+    },
+    {
+      "name": "UTF-8 静态路由与最终文件一致：/chinese.css",
+      "passed": true
+    },
+    {
+      "name": "服务页面显示 47 项，默认全选",
+      "passed": true
+    },
+    {
+      "name": "空范围禁止导出",
+      "passed": true
+    },
+    {
+      "name": "单选缺依赖时提示，保留原选择",
+      "passed": true
+    },
+    {
+      "name": "推荐首期生成完整中文计划",
+      "passed": true
+    },
+    {
+      "name": "修改后旧导出失效",
+      "passed": true
+    },
+    {
+      "name": "用户备注为纯文本",
+      "passed": true
+    },
+    {
+      "name": "真实下载文件为 UTF-8 BOM 且与预览逐字一致",
+      "passed": true,
+      "filename": "rpi-确认执行计划-2026-10-23.txt",
+      "bytes": 16385
+    },
+    {
+      "name": "全选生成后保留已完成/部分完成/未完成状态",
+      "passed": true
+    },
+    {
+      "name": "13 份中文文档与代码块可阅读",
+      "passed": true
+    },
+    {
+      "name": "搜索中文资料有效",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：中文使用说明",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：确认计划操作说明",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：项目总览与启动",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：Pi 源码全面分析",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：DSH 与 ZCode 参考分析",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：Rust 运行时架构",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：自定义配置与扩展",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：MCP 支持能力与边界",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：实现状态与后续阶段",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：多场景测试与性能验证",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：本机模拟任务性能基准",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：测试端口策略",
+      "passed": true
+    },
+    {
+      "name": "文档可渲染：Remote Facet 远程扩展",
+      "passed": true
+    },
+    {
+      "name": "计划页支持 file:// 离线生成",
+      "passed": true
+    },
+    {
+      "name": "文档页支持 file:// 离线阅读",
+      "passed": true
+    },
+    {
+      "name": "全部操作无 API 请求与控制台错误/警告",
+      "passed": true
+    }
+  ],
+  "viewports": [
+    {
+      "page": "plan",
+      "width": 1710,
+      "client": 1695,
+      "scroll": 1695,
+      "height": 934
+    },
+    {
+      "page": "plan",
+      "width": 560,
+      "client": 545,
+      "scroll": 545,
+      "height": 900
+    },
+    {
+      "page": "plan",
+      "width": 375,
+      "client": 360,
+      "scroll": 360,
+      "height": 900
+    },
+    {
+      "page": "docs",
+      "width": 375,
+      "client": 360,
+      "scroll": 360,
+      "height": 900
+    }
+  ],
+  "requests": [
+    {
+      "url": "http://127.0.0.1:374/plan",
+      "method": "GET",
+      "type": "Document"
+    },
+    {
+      "url": "http://127.0.0.1:374/plan.css",
+      "method": "GET",
+      "type": "Stylesheet"
+    },
+    {
+      "url": "http://127.0.0.1:374/plan.js",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+      "method": "GET",
+      "type": "Image"
+    },
+    {
+      "url": "http://127.0.0.1:374/docs",
+      "method": "GET",
+      "type": "Document"
+    },
+    {
+      "url": "http://127.0.0.1:374/docs.css",
+      "method": "GET",
+      "type": "Stylesheet"
+    },
+    {
+      "url": "http://127.0.0.1:374/documents-data.js",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "url": "http://127.0.0.1:374/docs.js",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/plan.html",
+      "method": "GET",
+      "type": "Document"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/plan.css",
+      "method": "GET",
+      "type": "Stylesheet"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/plan.js",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+      "method": "GET",
+      "type": "Image"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/docs.html",
+      "method": "GET",
+      "type": "Document"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/docs.css",
+      "method": "GET",
+      "type": "Stylesheet"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/documents-data.js",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "url": "file:///D:/ddcode/rpi/web/docs.js",
+      "method": "GET",
+      "type": "Script"
+    }
+  ],
+  "errors": [],
+  "status": "passed"
+}

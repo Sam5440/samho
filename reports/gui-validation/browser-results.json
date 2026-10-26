@@ -1,0 +1,151 @@
+{
+  "date": "2026-10-07",
+  "service": "http://127.0.0.1:374",
+  "runtime": "real Rust server",
+  "modelExecution": "demo simulation providers; no real language model call",
+  "checks": [
+    {
+      "scenario": "automatic grading + new task",
+      "status": "passed",
+      "request": {
+        "automatic": true,
+        "complexity": 4,
+        "tier": null,
+        "model": null
+      },
+      "model_id": "demo-balanced",
+      "session_id": "381ec078-eb1a-4380-812e-7470bba447d8",
+      "trace_id": "6733aa85-34cc-42b4-adb9-72eb0c7d769c"
+    },
+    {
+      "scenario": "same session + manual grading",
+      "status": "passed",
+      "request": {
+        "automatic": false,
+        "complexity": 7,
+        "tier": "reasoning",
+        "model": null
+      },
+      "model_id": "demo-reasoning",
+      "session_id": "381ec078-eb1a-4380-812e-7470bba447d8",
+      "trace_id": "4fa80570-d6a5-47de-995e-22c09f04d78e",
+      "persisted_messages": 5
+    },
+    {
+      "scenario": "fixed model override",
+      "status": "passed",
+      "request": {
+        "automatic": true,
+        "complexity": 4,
+        "tier": null,
+        "model": "demo-frontier"
+      },
+      "model_id": "demo-frontier",
+      "session_id": "dd50a2ed-f831-4688-90d4-14f2d2c024e1",
+      "trace_id": "8e7f745b-4148-4865-bcc6-b2ab4e21e2d6"
+    },
+    {
+      "scenario": "trace details",
+      "status": "passed",
+      "fields": [
+        "sequence",
+        "timestamp_ms",
+        "trace_id",
+        "session_id",
+        "span_id",
+        "parent_span_id",
+        "object_id",
+        "payload"
+      ],
+      "events_per_text_task": 5
+    },
+    {
+      "scenario": "Object registry",
+      "status": "passed",
+      "registered_objects": 9
+    },
+    {
+      "scenario": "MCP tab",
+      "status": "empty-state passed",
+      "configured_servers": 0,
+      "live_connection": "not exercised"
+    },
+    {
+      "scenario": "Skills tab",
+      "status": "empty-state passed",
+      "configured_skills": 0,
+      "skill_loading": "not exercised"
+    },
+    {
+      "scenario": "persistence after deliberate service restart",
+      "status": "passed",
+      "session_messages_restored": 5,
+      "session_trace_events": 10
+    },
+    {
+      "scenario": "simulation labels",
+      "status": "passed",
+      "classification": "provider === demo or global runtime simulation; no inference from model ID"
+    },
+    {
+      "scenario": "static JavaScript",
+      "status": "passed",
+      "command": "node --check web/app.js",
+      "html_unique_ids": 47,
+      "missing_dom_references": 0,
+      "unsafe_html_render_apis": 0
+    },
+    {
+      "scenario": "startup network + console after final rebuild/reload",
+      "status": "passed",
+      "startup_requests": 10,
+      "http_status": 200,
+      "console_errors": 0,
+      "console_warnings": 0
+    },
+    {
+      "scenario": "desktop layout",
+      "status": "passed",
+      "css_viewport": {
+        "width": 1710,
+        "height": 934
+      },
+      "horizontal_overflow": false,
+      "screenshot": "desktop.png",
+      "png_pixels": {
+        "width": 2565,
+        "height": 1401
+      }
+    },
+    {
+      "scenario": "narrow layout",
+      "status": "passed",
+      "css_viewport": {
+        "width": 560,
+        "height": 900
+      },
+      "horizontal_overflow": false,
+      "screenshot": "narrow.png",
+      "png_pixels": {
+        "width": 560,
+        "height": 900
+      }
+    }
+  ],
+  "limitations": [
+    "Browser cancellation race not exercised because demo tasks complete within milliseconds.",
+    "Active task session-switch race reviewed in code, not exercised against a slow provider.",
+    "Fixture has no MCP server or Skill; live MCP/Skill browser behavior is not covered.",
+    "Language model reasoning and provider compatibility are not validated by demo outputs."
+  ],
+  "evidence": [
+    "browser-api-evidence.json",
+    "browser-validation.md",
+    "desktop.png",
+    "narrow.png"
+  ],
+  "fixes": [
+    "Offline data-URL SVG favicon removed first-build favicon 404.",
+    "Simulation labels use provider rather than user-customizable model ID."
+  ]
+}
