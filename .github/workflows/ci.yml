@@ -1,0 +1,47 @@
+name: 跨平台 Rust 与中文网页验证
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@v2
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+      - name: Rust 行为及协议契约
+        run: cargo test --workspace --locked
+      - name: Rust 静态检查
+        run: cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
+      - name: 中文网页与确认计划契约
+        run: node --test scripts/test-chinese-pages.mjs
+      - name: 锁定依赖发布构建
+        run: cargo build --release --locked -p rpi
+      - name: 跨平台真实服务冒烟
+        run: python scripts/smoke_runtime.py --binary target/release/rpi
+      - name: 保留验证记录
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 验证-${{ matrix.os }}
+          path: reports/ci-smoke.json
+          if-no-files-found: ignore
