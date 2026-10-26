@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>rπ — 智能体工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'12'%20fill%3D'%23151918'%2F%3E%3Ctext%20x%3D'9'%20y%3D'45'%20fill%3D'%23c7f17a'%20font-family%3D'Georgia%2Cserif'%20font-style%3D'italic'%20font-size%3D'41'%3Er%CF%80%3C%2Ftext%3E%3C%2Fsvg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/chinese.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="workbench">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="rπ 工作台首页"><span class="brand-mark">rπ</span><span class="brand-word">智能体工作台<small>以对象组织能力</small></span></a>
+      <div class="workspace"><span class="tiny-square"></span><span id="workspace-name">正在连接工作区…</span><select id="workspace-select" aria-label="切换工作区" hidden></select></div>
+      <nav class="workbench-pages" aria-label="项目资料"><a href="/docs">中文文档</a><a href="/plan">确认计划</a></nav>
+      <div class="connection"><span id="connection-dot" class="status-dot"></span><span id="connection-label">连接中</span><span class="version">Rust 内核 / 0.1</span></div>
+    </header>
+
+    <aside class="sidebar" aria-label="会话导航">
+      <div class="side-heading"><span class="eyebrow">我的工作区</span><span class="corner-mark">01</span></div>
+      <button id="new-session" class="new-session" type="button"><span>＋</span> 新建任务 <kbd>Alt N</kbd></button>
+      <div class="section-title"><h2>会话</h2><span id="session-count" class="count">0</span><button id="refresh-sessions" class="icon-button" type="button" aria-label="刷新会话" title="刷新会话">↻</button></div>
+      <nav id="session-list" class="session-list" aria-label="历史会话"><p class="empty-note">正在读取会话…</p></nav>
+      <div class="sidebar-bottom"><div class="kernel-symbol">◈</div><div><strong>对象运行时</strong><span id="runtime-caption">准备连接本地运行时</span></div><span class="small-indicator"></span></div>
+    </aside>
+
+    <main class="main-panel">
+      <div class="conversation-heading"><div><span class="eyebrow">智能体 / 对话</span><h1 id="conversation-title">从一个任务开始</h1></div><div class="conversation-actions"><button id="open-settings" type="button" class="quiet-button" aria-controls="ui-settings">界面设置</button><button id="fork-session" type="button" class="quiet-button" disabled>分支会话</button><span id="task-state" class="state-label">就绪</span></div></div>
+      <form id="ui-settings" class="ui-settings" hidden><div class="settings-heading"><strong>界面与快捷键</strong><button id="close-settings" type="button" aria-label="关闭界面设置">×</button></div><label>主题<select id="ui-theme"><option value="dark">深色</option><option value="light">浅色</option><option value="system">跟随系统</option></select></label><label>发送任务<input id="ui-submit-key" value="Ctrl+Enter" maxlength="40" required></label><label>新建会话<input id="ui-new-key" value="Alt+N" maxlength="40" required></label><label>取消任务<input id="ui-cancel-key" value="Ctrl+K" maxlength="40" required></label><label>分支保留消息数<input id="fork-cutoff" type="number" min="0" placeholder="留空表示全部消息"></label><div class="settings-save"><span id="settings-status" role="status">设置保存到当前工作区。</span><button type="submit">保存设置</button></div></form>
+      <div id="simulation-banner" class="simulation-banner" hidden><span>模拟模式</span> 当前运行时使用模拟模型；输出用于验证框架流程。</div>
+      <div id="global-error" class="error-banner" role="alert" hidden></div>
+      <section id="messages" class="messages" aria-label="任务对话" aria-live="polite" aria-relevant="additions">
+        <div id="welcome" class="welcome">
+          <div class="welcome-coordinate">本地优先 <span>///</span> 全程可观测</div>
+          <div class="welcome-mark" aria-hidden="true">rπ<span>_</span></div>
+          <h2>让任务找到<br><em>合适的智能。</em></h2>
+          <p>定义目标，选择模型层级。<br>每次路由、每个工具、每段执行轨迹，都在掌握之中。</p>
+          <div class="prompt-starters"><button type="button" data-prompt="分析当前工作区的项目结构，解释主要模块及其职责。"><span>01 / 探索</span>分析工作区结构 <b>↗</b></button><button type="button" data-prompt="规划一个可扩展的 Agent 工具，列出它的 Object 接口、输入输出与验证方式。"><span>02 / 构建</span>设计一个 Agent 工具 <b>↗</b></button></div>
+        </div>
+      </section>
+      <div id="execution-status" class="execution-status" role="status" hidden><span class="working-spinner"></span><span id="execution-label">智能体正在执行任务…</span><button id="cancel-task" type="button">停止执行 <span>■</span></button></div>
+      <form id="composer" class="composer">
+        <div id="control-mode" class="control-mode" hidden><label for="send-mode">运行中发送</label><select id="send-mode"><option value="steer">调整方向 · 下一轮生效</option><option value="follow-up">追加任务 · 当前工作后处理</option></select><span id="queue-status" role="status"></span></div>
+        <label for="prompt" class="sr-only">任务内容</label><textarea id="prompt" rows="3" placeholder="描述你的任务…" maxlength="100000" required></textarea>
+        <div class="composer-controls"><div class="route-controls"><label class="select-wrap"><span>层级</span><select id="tier-select" aria-label="模型智能层级" title="指定层级将优先于自动分级"><option value="">自动路由</option><option value="nano">Nano · 轻量</option><option value="fast">Fast · 快速</option><option value="balanced">Balanced · 均衡</option><option value="reasoning">Reasoning · 推理</option><option value="frontier">Frontier · 前沿</option><option value="specialist">Specialist · 专家</option></select></label><label class="select-wrap model-select-wrap"><span>模型</span><select id="model-select" aria-label="指定模型" title="指定模型将覆盖自动选择"><option value="">由路由器选择</option></select></label></div><button id="submit-task" class="submit-task" type="submit" disabled><span>运行任务</span><b>↑</b></button></div>
+        <div class="composer-footnote"><span id="selection-summary">自动路由</span><label class="automatic-control" title="让路由器从任务描述推断所需智能层级"><input id="automatic" type="checkbox" checked> 自动分级</label><label class="complexity-control" for="complexity">复杂度 <output id="complexity-value" for="complexity">4</output><input id="complexity" type="range" min="0" max="10" value="4" aria-label="任务复杂度"></label><button id="open-skills" type="button">技能 <span id="selected-skill-count">0</span></button><a class="plan-link" href="/plan">生成确认计划</a><span class="send-shortcut">Ctrl / ⌘ Enter</span></div>
+      </form>
+      <footer class="conversation-footer"><span class="footer-dot"></span>可追溯的每一步<span id="last-run-meta">等待首个任务</span></footer>
+    </main>
+
+    <aside class="inspector" aria-label="运行时检查器">
+      <div class="inspector-heading"><div><span class="eyebrow">运行时检查器</span><h2>打开黑盒。</h2></div><span class="corner-mark">02</span></div>
+      <div class="inspector-tabs" role="tablist" aria-label="检查类型"><button id="tab-trace" class="active" type="button" role="tab" aria-selected="true" aria-controls="panel-trace" data-panel="trace">轨迹</button><button id="tab-objects" type="button" role="tab" aria-selected="false" aria-controls="panel-objects" data-panel="objects">对象</button><button id="tab-mcp" type="button" role="tab" aria-selected="false" aria-controls="panel-mcp" data-panel="mcp">MCP</button><button id="tab-skills" type="button" role="tab" aria-selected="false" aria-controls="panel-skills" data-panel="skills">技能</button></div>
+      <section id="panel-trace" class="inspector-panel" role="tabpanel" aria-labelledby="tab-trace"><div class="inspector-subheading"><span>执行轨迹</span><span id="trace-count">0 个事件</span></div><label class="trace-filter"><span class="sr-only">选择执行轨迹</span><select id="trace-select" aria-label="选择执行轨迹"><option value="">全部轨迹</option></select></label><div id="trace-summary" class="trace-summary">运行任务后，在此查看模型路由与调用链。</div><div id="trace-list" class="trace-list"><div class="trace-placeholder"><div class="trace-placeholder-line"></div><span>等待执行信号</span><small>从任务到结果，完整记录。</small></div></div></section>
+      <section id="panel-objects" class="inspector-panel" role="tabpanel" aria-labelledby="tab-objects" hidden><div class="inspector-subheading"><span>对象注册表</span><span id="object-count">0 个对象</span></div><div id="object-list" class="registry-list"></div></section>
+      <section id="panel-mcp" class="inspector-panel" role="tabpanel" aria-labelledby="tab-mcp" hidden><div class="inspector-subheading"><span>模型上下文协议</span></div><p class="panel-explanation">检查已注册的 MCP 服务与工具 Object。</p><div id="mcp-list" class="registry-list"></div></section>
+      <section id="panel-skills" class="inspector-panel" role="tabpanel" aria-labelledby="tab-skills" hidden><div class="inspector-subheading"><span>技能库</span><span id="skill-count">0 个技能</span></div><p class="panel-explanation">选择本次任务要加载的 Skill。</p><div id="skill-list" class="registry-list"></div></section>
+      <div class="trace-actions"><button id="load-more-events" type="button">加载后续事件</button><button id="export-trace" type="button" disabled>导出中文复盘</button><span id="page-status" role="status"></span></div>
+      <div class="inspector-footer"><span>统一对象设计</span><span id="stream-status">事件流 / —</span></div>
+    </aside>
+  </div>
+</body>
+</html>
