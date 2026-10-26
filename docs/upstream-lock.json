@@ -1,0 +1,9 @@
+{
+  "verified_date": "2026-10-07",
+  "repositories": [
+    {"name":"pi","url":"https://github.com/earendil-works/pi.git","directory":"upstream/pi","commit":"2db5e359bf84c1c0be51d2c5c5c5c7cf27072c2b","license":"MIT","shallow":false,"partial":false,"submodules":false,"git_connectivity_check":"passed"},
+    {"name":"dsh","url":"https://github.com/deepseek-ai/deepseek-harness.git","directory":"upstream/dsh","commit":"5badb15009ae1756c3afe0ae0cef1faafc290ccc","license":"MIT","shallow":false,"partial":false,"submodules":false,"git_connectivity_check":"passed"},
+    {"name":"zcode","url":"https://github.com/zai-org/ZCode.git","directory":"upstream/zcode","commit":"29628c9acdb81b703bbd4080c207a0e7ce5e276e","license":"Apache-2.0","shallow":false,"partial":false,"submodules":false,"git_connectivity_check":"passed"}
+  ],
+  "notes": "Independent full Git clones retained locally and ignored by the rewrite repository. Upstream licenses/notices remain in each clone. Recreate with git clone URL directory then git checkout commit. Git sources do not imply all external runtime assets or provider credentials are downloaded."
+}
