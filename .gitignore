@@ -1,0 +1,9 @@
+/target/
+/.rpi/
+__pycache__/
+*.pyc
+*.log
+!/reports/*.log
+/upstream/
+/reports/gui-validation/runtime-data/
+/reports/gui-validation/runtime.toml

@@ -1,0 +1,37 @@
+[package]
+name = "rpi-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust agent runtime with Object graph, model routing, MCP, skills and trace replay"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+toml.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+regex.workspace = true
+rmcp.workspace = true
+tracing.workspace = true
+fs2 = "0.4"
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10"
+jsonschema = { version = "0.33", default-features = false }
+ignore = "0.4"
+base64 = "0.22"
+rand = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+axum = "0.8"

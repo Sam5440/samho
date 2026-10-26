@@ -1,0 +1,31 @@
+[package]
+name = "rpi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rpi-core = { path = "../rpi-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true
+clap = { version = "4", features = ["derive"] }
+axum = "0.8"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "crossterm_0_29"] }
+crossterm = "0.29"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+
+[[bin]]
+name = "rpi"
+path = "src/main.rs"
