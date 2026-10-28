@@ -531,6 +531,22 @@ fn response_limit() -> ProviderError {
 fn protocol(message: impl Into<String>) -> ProviderError {
     ProviderError::new(ProviderErrorKind::Protocol, message)
 }
+// OpenAI-compatible bodies may embed an `error` object with a 2xx status or
+// inside an SSE frame. Classify typed errors the way the equivalent HTTP
+// status would be: upstream/server failures behave like 5xx (retryable),
+// rate-limit errors like 429; everything else stays a Protocol error.
+fn embedded_error(error: &Value) -> ProviderError {
+    let kind = match error.get("type").and_then(Value::as_str) {
+        Some("server_error" | "api_error" | "upstream_error" | "internal_error") => {
+            ProviderErrorKind::Server
+        }
+        Some("rate_limit_error" | "rate_limit_exceeded") => ProviderErrorKind::RateLimited,
+        _ => ProviderErrorKind::Protocol,
+    };
+    let mut message = String::from("provider error: ");
+    message.push_str(&error.to_string());
+    ProviderError::new(kind, message)
+}
 async fn read_body(response: reqwest::Response, limit: usize) -> ProviderResult<Vec<u8>> {
     let mut chunks = response.bytes_stream();
     let mut bytes = Vec::new();
@@ -649,6 +665,9 @@ fn validate_finish(reason: &str) -> ProviderResult<()> {
     }
 }
 fn decode_completion(value: Value) -> ProviderResult<ModelResponse> {
+    if let Some(error) = value.get("error") {
+        return Err(embedded_error(error));
+    }
     let choices = value["choices"]
         .as_array()
         .ok_or_else(|| protocol("provider response has no choices"))?;
@@ -828,6 +847,47 @@ struct StreamAccumulator {
     finish_reason: Option<String>,
     saw_choice: bool,
 }
+// GLM and OpenRouter style streams carry reasoning under a `reasoning` delta
+// key; DeepSeek style uses `reasoning_content`. Accept both, preferring
+// `reasoning_content` when a provider sends the two redundantly.
+fn reasoning_fragment(delta: &serde_json::Map<String, Value>) -> ProviderResult<Option<&str>> {
+    let field = delta
+        .get("reasoning_content")
+        .filter(|value| !value.is_null())
+        .map(|value| ("reasoning_content", value))
+        .or_else(|| {
+            delta
+                .get("reasoning")
+                .filter(|value| !value.is_null())
+                .map(|value| ("reasoning", value))
+        });
+    match field {
+        Some((name, value)) => value
+            .as_str()
+            .map(Some)
+            .ok_or_else(|| protocol(format!("SSE {name} must be a string"))),
+        None => Ok(None),
+    }
+}
+fn choice_contributes(choice: &Value) -> bool {
+    let text = |field: &str| {
+        choice
+            .get("delta")
+            .and_then(|delta| delta.get(field))
+            .filter(|value| !value.is_null())
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+    };
+    let calls = choice
+        .get("delta")
+        .and_then(|delta| delta.get("tool_calls"))
+        .filter(|value| !value.is_null())
+        .and_then(Value::as_array);
+    text("content")
+        || text("reasoning_content")
+        || text("reasoning")
+        || calls.is_some_and(|calls| !calls.is_empty())
+}
 impl StreamAccumulator {
     fn apply(
         &mut self,
@@ -835,7 +895,7 @@ impl StreamAccumulator {
         limits: &ProviderLimits,
     ) -> ProviderResult<Vec<ProviderStreamEvent>> {
         if let Some(error) = value.get("error") {
-            return Err(protocol(format!("provider SSE error: {error}")));
+            return Err(embedded_error(error));
         }
         let mut events = Vec::new();
         if let Some(usage) = value.get("usage").filter(|value| !value.is_null()) {
@@ -855,7 +915,14 @@ impl StreamAccumulator {
                 return Err(protocol("SSE choice index must be zero"));
             }
             if self.finish_reason.is_some() {
-                return Err(protocol("SSE choice continued after finish_reason"));
+                // Some OpenAI-compatible gateways append trailing frames after
+                // the finish_reason chunk: a repeated choice with an empty
+                // delta, or a final usage-only chunk. Tolerate empty tail
+                // frames; reject choices that still carry model payload.
+                if choice_contributes(choice) {
+                    return Err(protocol("SSE choice continued after finish_reason"));
+                }
+                continue;
             }
             self.saw_choice = true;
             let delta = choice["delta"]
@@ -866,26 +933,23 @@ impl StreamAccumulator {
             {
                 return Err(protocol("SSE role must be assistant"));
             }
-            for (name, target, reasoning) in [
-                ("content", &mut self.content, false),
-                ("reasoning_content", &mut self.reasoning, true),
-            ] {
-                if let Some(value) = delta.get(name).filter(|value| !value.is_null()) {
-                    let fragment = value
-                        .as_str()
-                        .ok_or_else(|| protocol(format!("SSE {name} must be a string")))?;
-                    target.push_str(fragment);
-                    if !fragment.is_empty() {
-                        events.push(if reasoning {
-                            ProviderStreamEvent::ReasoningDelta {
-                                delta: fragment.into(),
-                            }
-                        } else {
-                            ProviderStreamEvent::TextDelta {
-                                delta: fragment.into(),
-                            }
-                        });
-                    }
+            if let Some(value) = delta.get("content").filter(|value| !value.is_null()) {
+                let fragment = value
+                    .as_str()
+                    .ok_or_else(|| protocol("SSE content must be a string"))?;
+                self.content.push_str(fragment);
+                if !fragment.is_empty() {
+                    events.push(ProviderStreamEvent::TextDelta {
+                        delta: fragment.into(),
+                    });
+                }
+            }
+            if let Some(fragment) = reasoning_fragment(delta)? {
+                self.reasoning.push_str(fragment);
+                if !fragment.is_empty() {
+                    events.push(ProviderStreamEvent::ReasoningDelta {
+                        delta: fragment.into(),
+                    });
                 }
             }
             if let Some(calls) = delta.get("tool_calls").filter(|value| !value.is_null()) {
@@ -952,7 +1016,9 @@ impl StreamAccumulator {
                     });
                 }
             }
-            if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
+            if self.finish_reason.is_none()
+                && let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null())
+            {
                 let reason = reason
                     .as_str()
                     .ok_or_else(|| protocol("finish_reason must be a string"))?;

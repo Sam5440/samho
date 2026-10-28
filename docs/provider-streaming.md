@@ -29,7 +29,11 @@ arguments），服务端 usage 使用 `Usage`，终止原因使用 `Finish`，�
 TCP 分片、CRLF、UTF-8 BOM 和多行 `data:` 字段。只有收到完整 `[DONE]` 且已有
 `finish_reason` 时才返回成功；中途断开、无效 JSON、工具参数无法合并成 JSON
 对象都会返回 `Protocol`。`finish_reason=length` 返回 `OutputLimit`，不会被当作
-成功结果。默认总响应上限为 16 MiB，单个 SSE 帧为 256 KiB，工具调用最多 128 个；
+成功结果。推理增量同时接受 DeepSeek 风格的 `reasoning_content` 与 GLM/OpenRouter
+风格的 `reasoning` 键（两者同时出现时取 `reasoning_content`）。部分网关会在
+`finish_reason` 帧之后追加空 delta 帧或仅含 usage 的尾帧，这类空尾帧被容忍；
+尾帧若携带新的正文/推理/工具负载仍返回 `Protocol`。默认总响应上限为 16 MiB，
+单个 SSE 帧为 256 KiB，工具调用最多 128 个；
 可用 `Provider::with_limits` 调整正数限制。
 
 请求中的 `stream`、`stream_options`、`n`、模型、消息、工具、推理字段、输出 token

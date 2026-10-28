@@ -513,3 +513,94 @@ async fn injected_trait_backend_and_compatibility_wrapper_work() {
     assert_eq!(result.unwrap().usage.output_tokens, 2);
     assert!(matches!(events.last(), Some(ProviderStreamEvent::Done)));
 }
+
+// GLM 网关风格：`reasoning` 键携带推理增量，finish_reason 后追加空 delta 帧与 usage 帧。
+#[tokio::test]
+async fn accepts_reasoning_alias_and_empty_tail_frames_after_finish_reason() {
+    let stream = format!(
+        "{}{}{}{}data: {}\r\n\r\ndata: {}\r\n\r\ndata: [DONE]\r\n\r\n",
+        frame(json!({"role":"assistant","content":""}), None),
+        frame(json!({"reasoning":"思考"}), None),
+        frame(json!({"content":"答案"}), None),
+        frame(json!({}), Some("stop")),
+        json!({"choices":[{"index":0,"delta":{},"finish_reason":null}]}),
+        json!({"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3}})
+    );
+    let (model, _state, server) = fixture(stream, 1, 0, StatusCode::OK).await;
+    let (result, events) = collect(Provider::new(5000).unwrap(), model).await;
+    let result = result.unwrap();
+    assert_eq!(result.message["content"], "答案");
+    assert_eq!(result.message["reasoning_content"], "思考");
+    assert_eq!(
+        result.usage,
+        Usage {
+            input_tokens: 5,
+            output_tokens: 3
+        }
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ProviderStreamEvent::Finish { .. }))
+            .count(),
+        1
+    );
+    server.abort();
+}
+
+// finish_reason 之后携带真实内容的帧仍然是协议错误。
+#[tokio::test]
+async fn rejects_model_payload_after_finish_reason() {
+    let stream = format!(
+        "{}{}data: [DONE]\r\n\r\n",
+        frame(json!({"role":"assistant","content":"ok"}), Some("stop")),
+        frame(json!({"content":"late"}), None)
+    );
+    let (model, _state, server) = fixture(stream, 1, 0, StatusCode::OK).await;
+    let (result, _events) = collect(Provider::new(5000).unwrap(), model).await;
+    let error = result.unwrap_err();
+    assert_eq!(error.kind, ProviderErrorKind::Protocol);
+    assert!(error.message.contains("continued after finish_reason"));
+    server.abort();
+}
+
+// 网关 2xx + SSE/JSON 内嵌 error 对象按类型分类：upstream_error 视为可重试的 Server。
+#[tokio::test]
+async fn classifies_embedded_upstream_error_as_retryable_server() {
+    let stream = format!(
+        "data: {}\r\n\r\ndata: [DONE]\r\n\r\n",
+        json!({"error":{"message":"Unable to forward upstream stream","type":"upstream_error"}})
+    );
+    let (model, _state, server) = fixture(stream, 1, 0, StatusCode::OK).await;
+    let (result, _events) = collect(Provider::new(5000).unwrap(), model).await;
+    let error = result.unwrap_err();
+    assert_eq!(error.kind, ProviderErrorKind::Server);
+    assert!(error.retryable());
+    assert!(error.message.contains("upstream_error"));
+    server.abort();
+}
+
+// 非流式 2xx + 内嵌 error 对象走同一分类器。
+#[tokio::test]
+async fn classifies_non_streaming_embedded_error_and_rate_limit_type() {
+    let (model, _state, server) = fixture(
+        br#"{"error":{"message":"slow down","type":"rate_limit_error"}}"#.to_vec(),
+        1,
+        0,
+        StatusCode::OK,
+    )
+    .await;
+    let provider = Provider::new(5000).unwrap();
+    let error = provider
+        .complete_typed(
+            &model,
+            &[json!({"role":"user","content":"hi"})],
+            &[],
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ProviderErrorKind::RateLimited);
+    assert!(error.retryable());
+    server.abort();
+}
