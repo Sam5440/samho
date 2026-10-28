@@ -7,3 +7,5 @@ __pycache__/
 /upstream/
 /reports/gui-validation/runtime-data/
 /reports/gui-validation/runtime.toml
+.zcode/
+/reports/frontend-refactor/runtime-data/
