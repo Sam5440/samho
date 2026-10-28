@@ -753,16 +753,17 @@ impl AgentRuntime {
                     )?;
                     tokio::select! {_=cancel.cancelled()=>bail!("cancelled before network request"),r=self.network.authorize_url(&url)=>r?}
                 }
+                let output_reserve = model.budget_output_reserve();
                 let reservation_usd = (projection.input_tokens as f64
                     * model.input_usd_per_million
-                    + model.max_output_tokens as f64 * model.output_usd_per_million)
+                    + output_reserve as f64 * model.output_usd_per_million)
                     / 1_000_000.0;
                 let reservation = self
                     .budgets
                     .reserve(
                         task_id,
                         reservation_usd,
-                        u64::from(projection.input_tokens) + u64::from(model.max_output_tokens),
+                        u64::from(projection.input_tokens) + u64::from(output_reserve),
                         profile.budget_usd,
                     )
                     .await?;
@@ -802,12 +803,28 @@ impl AgentRuntime {
                             Consumption {
                                 usd: reservation_usd,
                                 tokens: u64::from(projection.input_tokens)
-                                    + u64::from(model.max_output_tokens),
+                                    + u64::from(model.budget_output_reserve()),
                             }
                         } else {
                             actual
                         };
-                        self.budgets.settle(reservation, actual).await?;
+                        let overage = self.budgets.settle(reservation, actual.clone()).await?;
+                        if overage {
+                            // 最坏情况估计被打破：真实账目已持久化，发出告警并继续；
+                            // 后续派发的 ceiling 检查仍会按累计真实用量拦截。
+                            self.emit(
+                                trace_id, session_id, task_id,
+                                &format!("model:{turn}:{attempt}"),
+                                "budget.overage",
+                                json!({
+                                    "turn":turn,"attempt":attempt,"model_id":model.id,
+                                    "reserved_usd":reservation_usd,
+                                    "actual":actual,
+                                    "note":"usage exceeded worst-case reservation; recorded and continuing; dispatch ceilings still apply"
+                                }),
+                                Some(format!("model:{}", model.id)),
+                            ).await?;
+                        }
                         break response;
                     }
                     Err(error) => {

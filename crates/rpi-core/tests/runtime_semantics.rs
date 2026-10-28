@@ -107,6 +107,22 @@ impl ModelProvider for Script {
             .find(|m| m["role"] == "user")
             .and_then(|m| m["content"].as_str())
             .unwrap_or("");
+        if self.mode == "reasoning_overage" || self.mode == "massive_overage" {
+            // 思考 token 不受 max_output_tokens 约束的网关行为：
+            // 轻度超额应被思考预留吸收，重度超额仍中止派发。
+            return Ok(ModelResponse {
+                finish_reason: "stop".into(),
+                message: json!({"role":"assistant","content":format!("fixture {last}")}),
+                usage: Usage {
+                    input_tokens: 50,
+                    output_tokens: if self.mode == "reasoning_overage" {
+                        750
+                    } else {
+                        5000
+                    },
+                },
+            });
+        }
         let message = if self.mode == "effect" && n == 0 {
             json!({"role":"assistant","content":null,"tool_calls":[{"id":"effect-1","type":"function","function":{"name":"effect","arguments":"{}"}}]})
         } else if self.mode == "skill" && n == 0 {
@@ -552,6 +568,40 @@ async fn sqlite_runtime_sessions_traces_and_budget_survive_restart() -> Result<(
             .iter()
             .any(|e| e.kind == "task.done")
     );
+    runtime.shutdown().await?;
+    Ok(())
+}
+#[tokio::test]
+async fn reasoning_overage_is_absorbed_and_massive_overage_warns_but_completes() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let script = Script::new("reasoning_overage");
+    let mut c = config(dir.path());
+    c.models
+        .iter_mut()
+        .for_each(|m| m.supports_reasoning = true);
+    let runtime = AgentRuntime::builder(c.clone())
+        .provider(script.clone())
+        .build()
+        .await?;
+    let result = runtime
+        .run(request("hello"), CancellationToken::new())
+        .await?;
+    assert_eq!(result.status, "done");
+    runtime.shutdown().await?;
+    drop(runtime);
+    // 重度超额：真实账目持久化、发出 budget.overage 告警，任务不丢弃已完成轮次；
+    // 硬上限仍由下一次派发前的 ceiling 检查把关。
+    let script = Script::new("massive_overage");
+    let runtime = AgentRuntime::builder(c)
+        .provider(script.clone())
+        .build()
+        .await?;
+    let result = runtime
+        .run(request("hello"), CancellationToken::new())
+        .await?;
+    assert_eq!(result.status, "done");
+    let events = runtime.events.events(Some(&result.trace_id)).await?;
+    assert!(events.iter().any(|e| e.kind == "budget.overage"));
     runtime.shutdown().await?;
     Ok(())
 }

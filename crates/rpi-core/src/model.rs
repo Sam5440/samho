@@ -45,6 +45,10 @@ pub struct ModelDescriptor {
     pub supports_vision: bool,
     pub supports_reasoning: bool,
     pub reasoning_effort: Option<String>,
+    /// 预留额度中除 `max_output_tokens` 之外再为思考 token 预留的数量。
+    /// 某些网关对推理模型不把思考 token 计入 `max_tokens`，缺省
+    /// （None）时按 `supports_reasoning` 预留等额于 `max_output_tokens`。
+    pub reasoning_reserve_tokens: Option<u32>,
     pub streaming: bool,
     pub intelligence_tier: Option<String>,
     pub output_token_parameter: String,
@@ -69,6 +73,7 @@ impl Default for ModelDescriptor {
             supports_vision: false,
             supports_reasoning: false,
             reasoning_effort: None,
+            reasoning_reserve_tokens: None,
             streaming: false,
             intelligence_tier: None,
             output_token_parameter: "max_tokens".into(),
@@ -81,6 +86,19 @@ impl Default for ModelDescriptor {
     }
 }
 impl ModelDescriptor {
+    /// 预算预留使用的输出上限：`max_output_tokens` 加思考余量。
+    /// 推理模型的思考 token 不受网关 `max_tokens` 约束时，实际
+    /// `completion_tokens` 会超过 `max_output_tokens`，预留必须覆盖。
+    pub fn budget_output_reserve(&self) -> u32 {
+        let reasoning = self
+            .reasoning_reserve_tokens
+            .unwrap_or(if self.supports_reasoning {
+                self.max_output_tokens
+            } else {
+                0
+            });
+        self.max_output_tokens.saturating_add(reasoning)
+    }
     pub fn tier_name(&self) -> &str {
         self.intelligence_tier
             .as_deref()

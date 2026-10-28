@@ -115,7 +115,10 @@ impl BudgetTracker {
             tokens,
         })
     }
-    pub async fn settle(&self, reservation: Reservation, actual: Consumption) -> Result<()> {
+    /// 用实际用量结算预留。超预留不是错误：最坏情况估计错了，
+    /// 真实账目已经持久化；返回 `true` 表示超预留，由调用方发出
+    /// 告警事件。后续派发前的 ceiling 检查仍按累计真实用量把关。
+    pub async fn settle(&self, reservation: Reservation, actual: Consumption) -> Result<bool> {
         if !actual.usd.is_finite() || actual.usd < 0.0 {
             bail!("invalid provider usage");
         }
@@ -136,13 +139,7 @@ impl BudgetTracker {
             .tokens
             .saturating_sub(reservation.tokens)
             .saturating_add(actual.tokens);
-        // 服务端上报超出预留时已真实发生；持久化真实账目并中止后续派发。
-        if actual.usd > reservation.usd + 1e-12 || actual.tokens > reservation.tokens {
-            bail!(
-                "provider usage exceeded reservation; actual usage recorded, no further dispatch"
-            );
-        }
-        Ok(())
+        Ok(actual.usd > reservation.usd + 1e-12 || actual.tokens > reservation.tokens)
     }
     async fn write(ledger: &mut Ledger, total: &Consumption, durable: bool) -> Result<()> {
         let mut bytes = serde_json::to_vec(total)?;
