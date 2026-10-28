@@ -1,0 +1,160 @@
+/* rπ 设计 token —— 对齐 ZCode DESIGN.md 的派生方式：
+   语义色全部由基色调 color-mix 派生，切主题只换基色；
+   字号语义刻度由 --ui-font-size 驱动；圆角分层 xl→lg→md→sm。 */
+
+:root {
+  color-scheme: light;
+
+  /* 基色 */
+  --c-neutral-0: #ffffff;
+  --c-neutral-50: #f6f7f5;
+  --c-neutral-100: #eceee9;
+  --c-neutral-200: #dfe2da;
+  --c-neutral-300: #c6c9bf;
+  --c-neutral-400: #9da194;
+  --c-neutral-500: #757a6d;
+  --c-neutral-600: #565b50;
+  --c-neutral-700: #41453c;
+  --c-neutral-800: #2e312b;
+  --c-neutral-900: #1d1f1b;
+  --c-neutral-950: #131512;
+
+  --c-lime-300: #d9f79a;
+  --c-lime-400: #c7f17a;
+  --c-lime-500: #a8d94f;
+  --c-lime-600: #7fae32;
+  --c-lime-700: #5d8426;
+
+  --c-red-400: #f87171;
+  --c-red-500: #ef4444;
+  --c-red-600: #dc2626;
+  --c-amber-400: #fbbf24;
+  --c-amber-500: #f59e0b;
+  --c-blue-400: #60a5fa;
+  --c-blue-500: #3b82f6;
+  --c-blue-600: #2563eb;
+  --c-violet-400: #a78bfa;
+  --c-violet-600: #7c3aed;
+  --c-teal-400: #2dd4bf;
+  --c-teal-600: #0d9488;
+  --c-pink-400: #f472b6;
+  --c-pink-600: #db2777;
+
+  /* 语义层（浅色） */
+  --background: var(--c-neutral-50);
+  --foreground: var(--c-neutral-900);
+  --surface: color-mix(in oklab, var(--c-neutral-950) 3%, transparent);
+  --card: var(--c-neutral-0);
+  --card-foreground: var(--c-neutral-900);
+  --popover: var(--c-neutral-0);
+  --popover-foreground: var(--c-neutral-900);
+  --sidebar: var(--c-neutral-100);
+  --sidebar-foreground: var(--c-neutral-800);
+  --primary: var(--c-neutral-900);
+  --primary-foreground: var(--c-lime-300);
+  --brand: var(--c-lime-600);
+  --brand-foreground: var(--c-neutral-950);
+  --secondary: color-mix(in oklab, var(--c-neutral-950) 6%, transparent);
+  --secondary-foreground: var(--c-neutral-800);
+  --muted: color-mix(in oklab, var(--c-neutral-950) 5%, transparent);
+  --muted-foreground: var(--c-neutral-500);
+  --subtle-foreground: var(--c-neutral-400);
+  --accent: color-mix(in oklab, var(--c-lime-600) 12%, transparent);
+  --accent-foreground: var(--c-neutral-900);
+  --destructive: var(--c-red-600);
+  --destructive-foreground: #ffffff;
+  --success: var(--c-teal-600);
+  --warning: var(--c-amber-500);
+  --info: var(--c-blue-600);
+  --border: color-mix(in oklab, var(--c-neutral-950) 10%, transparent);
+  --border-strong: color-mix(in oklab, var(--c-neutral-950) 18%, transparent);
+  --input: color-mix(in oklab, var(--c-neutral-950) 12%, transparent);
+  --ring: color-mix(in oklab, var(--c-lime-600) 45%, transparent);
+  --tag: color-mix(in oklab, var(--c-neutral-950) 7%, transparent);
+  --diff-added: var(--c-teal-600);
+  --diff-added-bg: color-mix(in oklab, var(--c-teal-600) 12%, transparent);
+  --diff-removed: var(--c-red-600);
+  --diff-removed-bg: color-mix(in oklab, var(--c-red-600) 10%, transparent);
+
+  /* 轨迹角色色 */
+  --tr-user: var(--c-blue-600);
+  --tr-assistant: var(--c-lime-700);
+  --tr-reasoning: var(--c-violet-600);
+  --tr-tool-call: var(--c-teal-600);
+  --tr-tool-result: var(--c-neutral-500);
+  --tr-system: var(--c-neutral-500);
+  --tr-error: var(--c-red-600);
+
+  --sh-menu: 0 4px 16px -2px color-mix(in oklab, var(--c-neutral-950) 22%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--c-neutral-950) 8%, transparent);
+  --sh-dialog: 0 16px 48px -12px color-mix(in oklab, var(--c-neutral-950) 35%, transparent);
+  --mask-fade: linear-gradient(to bottom, black 0%, black calc(100% - 64px), transparent 100%);
+
+  /* 几何刻度 */
+  --ui-font-size: 14px;
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "PingFang SC", "Microsoft YaHei UI", monospace;
+  --font-serif: Georgia, "Songti SC", "SimSun", serif;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: var(--c-neutral-950);
+  --foreground: var(--c-neutral-100);
+  --surface: color-mix(in oklab, var(--c-neutral-0) 3%, transparent);
+  --card: color-mix(in oklab, var(--c-neutral-0) 4%, var(--c-neutral-950));
+  --card-foreground: var(--c-neutral-100);
+  --popover: color-mix(in oklab, var(--c-neutral-0) 5%, var(--c-neutral-950));
+  --popover-foreground: var(--c-neutral-100);
+  --sidebar: color-mix(in oklab, var(--c-neutral-0) 2.5%, var(--c-neutral-950));
+  --sidebar-foreground: var(--c-neutral-200);
+  --primary: var(--c-lime-400);
+  --primary-foreground: var(--c-neutral-950);
+  --brand: var(--c-lime-400);
+  --brand-foreground: var(--c-neutral-950);
+  --secondary: color-mix(in oklab, var(--c-neutral-0) 7%, transparent);
+  --secondary-foreground: var(--c-neutral-200);
+  --muted: color-mix(in oklab, var(--c-neutral-0) 5%, transparent);
+  --muted-foreground: var(--c-neutral-400);
+  --subtle-foreground: var(--c-neutral-500);
+  --accent: color-mix(in oklab, var(--c-lime-400) 14%, transparent);
+  --accent-foreground: var(--c-lime-300);
+  --destructive: var(--c-red-400);
+  --destructive-foreground: var(--c-neutral-950);
+  --success: var(--c-teal-400);
+  --warning: var(--c-amber-400);
+  --info: var(--c-blue-400);
+  --border: color-mix(in oklab, var(--c-neutral-0) 10%, transparent);
+  --border-strong: color-mix(in oklab, var(--c-neutral-0) 18%, transparent);
+  --input: color-mix(in oklab, var(--c-neutral-0) 14%, transparent);
+  --ring: color-mix(in oklab, var(--c-lime-400) 40%, transparent);
+  --tag: color-mix(in oklab, var(--c-neutral-0) 8%, transparent);
+  --diff-added: var(--c-teal-400);
+  --diff-added-bg: color-mix(in oklab, var(--c-teal-400) 12%, transparent);
+  --diff-removed: var(--c-red-400);
+  --diff-removed-bg: color-mix(in oklab, var(--c-red-400) 12%, transparent);
+
+  --tr-user: var(--c-blue-400);
+  --tr-assistant: var(--c-lime-400);
+  --tr-reasoning: var(--c-violet-400);
+  --tr-tool-call: var(--c-teal-400);
+  --tr-tool-result: var(--c-neutral-400);
+  --tr-system: var(--c-neutral-400);
+  --tr-error: var(--c-red-400);
+
+  --sh-menu: 0 4px 20px -2px color-mix(in oklab, var(--c-neutral-0) 10%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--c-neutral-0) 10%, transparent);
+  --sh-dialog: 0 16px 56px -12px rgb(0 0 0 / 60%);
+}

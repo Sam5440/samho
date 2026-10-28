@@ -101,6 +101,15 @@
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
+  function sessionStatus(item) {
+    const s = typeof item === 'object' && item ? String(item.status || 'ready') : 'ready';
+    if (s === 'running' || s === 'queued') return { label: '运行中', cls: 'st-running', icon: '◐' };
+    if (s === 'failed') return { label: '失败', cls: 'st-failed', icon: '✕' };
+    if (s === 'interrupted') return { label: '已中断', cls: 'st-interrupted', icon: '⏸' };
+    if (s === 'done' || s === 'completed') return { label: '已完成', cls: 'st-done', icon: '○' };
+    return { label: '就绪', cls: 'st-ready', icon: '○' };
+  }
+
   function renderSessions() {
     const list = byId('session-list');
     list.replaceChildren();
@@ -112,15 +121,19 @@
     state.sessions.forEach((session) => {
       const id = sessionId(session);
       const selected = id === state.currentSessionId;
+      const st = sessionStatus(session);
       const button = node('button', 'session-item' + (selected ? ' selected' : ''));
       button.type = 'button';
       button.setAttribute('aria-current', selected ? 'page' : 'false');
       button.title = sessionTitle(session);
-      button.append(node('span', 'session-icon', selected ? '◉' : '○'));
+      button.append(node('span', 'session-icon', selected ? '◉' : st.icon));
       const copy = node('span', 'session-copy');
       copy.append(node('span', 'session-title', sessionTitle(session)));
       const stamp = typeof session === 'object' && (session.updated_at || session.updated_at_ms || session.created_at || session.created_at_ms);
-      copy.append(node('span', 'session-subtitle', dateLabel(stamp) || id.slice(0, 12)));
+      const subtitle = node('span', 'session-subtitle');
+      subtitle.append(node('span', 'session-status ' + st.cls, st.label + ' · '));
+      subtitle.append(node('span', 'session-stamp', dateLabel(stamp) || id.slice(0, 12)));
+      copy.append(subtitle);
       button.append(copy);
       button.addEventListener('click', () => loadSession(id));
       list.append(button);

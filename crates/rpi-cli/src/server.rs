@@ -116,43 +116,31 @@ pub fn router(runtime: Arc<AgentRuntime>) -> Router {
     router_with_state(AppState::new(runtime))
 }
 
+// 内嵌静态资源白名单：UI 重构后前端拆分为 ES Modules + 组件化 CSS。
+const STATIC_ASSETS: &[(&str, &str, &str)] = &[
+    ("/index.html", "text/html; charset=utf-8", include_str!("../../../web/index.html")),
+    ("/ui/tokens.css", "text/css; charset=utf-8", include_str!("../../../web/ui/tokens.css")),
+    ("/ui/base.css", "text/css; charset=utf-8", include_str!("../../../web/ui/base.css")),
+    ("/ui/components.css", "text/css; charset=utf-8", include_str!("../../../web/ui/components.css")),
+    ("/app.css", "text/css; charset=utf-8", include_str!("../../../web/app.css")),
+    ("/js/main.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/main.js")),
+    ("/js/api.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/api.js")),
+    ("/js/store.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/store.js")),
+    ("/js/ui.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/ui.js")),
+    ("/js/markdown.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/markdown.js")),
+    ("/js/sessions.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/sessions.js")),
+    ("/js/composer.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/composer.js")),
+    ("/js/model-select.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/model-select.js")),
+    ("/js/timeline/projection.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/projection.js")),
+    ("/js/timeline/render.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/render.js")),
+    ("/js/timeline/tools.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/tools.js")),
+    ("/js/trajectory/render.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/trajectory/render.js")),
+    ("/js/trajectory/expansion.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/trajectory/expansion.js")),
+];
+
 fn router_with_state(app: AppState) -> Router {
-    Router::new()
-        .route(
-            "/",
-            get(|| async { Html(include_str!("../../../web/index.html")) }),
-        )
-        .route(
-            "/index.html",
-            get(|| async { Html(include_str!("../../../web/index.html")) }),
-        )
-        .route(
-            "/style.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../../../web/style.css"),
-                )
-            }),
-        )
-        .route(
-            "/app.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../../../web/app.js"),
-                )
-            }),
-        )
-        .route(
-            "/chinese.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../../../web/chinese.css"),
-                )
-            }),
-        )
+    let mut router = Router::new()
+        .route("/", get(|| async { Html(include_str!("../../../web/index.html")) }))
         .route(
             "/docs",
             get(|| async { Html(include_str!("../../../web/docs.html")) }),
@@ -214,16 +202,13 @@ fn router_with_state(app: AppState) -> Router {
                 )
             }),
         )
-        .route(
-            "/api/health",
-            get(|| async { Json(json!({"status":"ok","api_version":1})) }),
-        )
+        .route("/api/health", get(|| async { Json(json!({"status":"ok","api_version":1})) }))
         .route("/api/state", get(state))
         .route("/api/models", get(models))
         .route("/api/objects", get(objects))
         .route("/api/skills", get(skills))
         .route("/api/sessions", get(sessions))
-        .route("/api/sessions/{id}", get(session))
+        .route("/api/sessions/{id}", get(session).patch(patch_session).delete(delete_session))
         .route("/api/sessions/{id}/fork", post(fork_session))
         .route("/api/run", post(run_task))
         .route("/api/tasks/{id}", get(task))
@@ -238,7 +223,21 @@ fn router_with_state(app: AppState) -> Router {
         .route("/api/traces/{id}/export", get(trace_export))
         .route("/api/ui", get(ui).put(update_ui))
         .route("/api/workspaces", get(workspaces))
-        .route("/api/skills/refresh", post(refresh_skills))
+        .route("/api/skills/refresh", post(refresh_skills));
+    for (path, mime, body) in STATIC_ASSETS {
+        let mime = *mime;
+        let body = *body;
+        router = router.route(
+            path,
+            get(move || async move {
+                (
+                    [(header::CONTENT_TYPE, mime)],
+                    body,
+                )
+            }),
+        );
+    }
+    router
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(local_origin))
         .with_state(app)
@@ -288,6 +287,48 @@ async fn local_origin(request: Request, next: Next) -> Response {
     response
 }
 
+// 附加工作区各自持有独立运行时（独立 data_dir/会话/预算），挂在 /w/{id} 前缀下；
+// 工作台前端按 location.pathname 推导同前缀 API 路径。
+// axum 0.8 的 nest 匹配 /w/{id} 与子路径，但不匹配 /w/{id}/（尾斜杠）；
+// 路由匹配先于中间件执行，无法用层重写 URI，因此在 fallback 里对尾斜杠形态 308 重定向。
+async fn workspace_fallback(uri: axum::http::Uri) -> Response {
+    let path = uri.path();
+    if path.starts_with("/w/") && path.ends_with('/') && path.len() > 4 {
+        let trimmed = path.trim_end_matches('/');
+        let location = match uri.query() {
+            Some(query) => format!("{trimmed}?{query}"),
+            None => trimmed.to_string(),
+        };
+        return (
+            StatusCode::PERMANENT_REDIRECT,
+            [(header::LOCATION, location)],
+        )
+            .into_response();
+    }
+    (StatusCode::NOT_FOUND, "not found").into_response()
+}
+
+async fn attach_workspaces(
+    runtime: Arc<AgentRuntime>,
+    router: Router,
+) -> Result<(Router, Vec<Arc<AgentRuntime>>)> {
+    let mut router = router;
+    let mut extra_runtimes = Vec::new();
+    for workspace in &runtime.config.workspaces {
+        let mut workspace_config = runtime.config.clone();
+        workspace_config.workspace = workspace.path.clone();
+        workspace_config.data_dir = workspace.data_dir.clone();
+        let workspace_runtime = AgentRuntime::new(workspace_config).await?;
+        router = router.nest(
+            &format!("/w/{}", workspace.id),
+            router_with_state(AppState::new(workspace_runtime.clone())),
+        );
+        extra_runtimes.push(workspace_runtime);
+    }
+    let router = router.fallback(workspace_fallback);
+    Ok((router, extra_runtimes))
+}
+
 pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
     let address: SocketAddr = address.parse()?;
     anyhow::ensure!(
@@ -300,9 +341,11 @@ pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
         "TUI client: rpi tui --url http://{}",
         listener.local_addr()?
     );
-    let app = AppState::new(runtime);
+    let app = AppState::new(runtime.clone());
+    let (router, extra_runtimes) =
+        attach_workspaces(runtime, router_with_state(app.clone())).await?;
     let shutdown_state = app.clone();
-    let outcome = axum::serve(listener, router_with_state(app.clone()))
+    let outcome = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
             shutdown_state.stop().await;
@@ -310,6 +353,9 @@ pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
         .await;
     app.stop().await;
     app.settle().await;
+    for workspace_runtime in extra_runtimes {
+        workspace_runtime.shutdown().await?;
+    }
     outcome?;
     Ok(())
 }
@@ -357,6 +403,72 @@ async fn session(State(app): State<AppState>, Path(id): Path<String>) -> ApiResu
         Some(session) => Ok(Json(app.redact(json!(session)))),
         None => Err(ApiError(StatusCode::NOT_FOUND, "session not found".into())),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionPatch {
+    title: Option<String>,
+    archived: Option<bool>,
+}
+
+async fn patch_session(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SessionPatch>,
+) -> ApiResult<Value> {
+    if app.runtime.session(&id).await?.is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    let mut updated = None;
+    if let Some(title) = &body.title {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > 200 {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                "title 不能为空且不超过 200 字符".into(),
+            ));
+        }
+        updated = Some(
+            app.runtime
+                .sessions_store
+                .rename(&id, title.to_string())
+                .await
+                .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?,
+        );
+    }
+    if let Some(archived) = body.archived {
+        updated = Some(
+            app.runtime
+                .sessions_store
+                .set_archived(&id, archived)
+                .await
+                .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?,
+        );
+    }
+    match updated {
+        Some(session) => Ok(Json(app.redact(json!(session)))),
+        None => Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "请求体至少包含 title 或 archived".into(),
+        )),
+    }
+}
+
+async fn delete_session(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Value> {
+    if app.runtime.session(&id).await?.is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    let removed = app
+        .runtime
+        .sessions_store
+        .delete_cascade(&id)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    Ok(Json(json!({"deleted": removed})))
 }
 
 async fn run_task(
@@ -875,6 +987,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use futures_util::StreamExt;
     use rpi_core::RuntimeConfig;
+    use rpi_core::config::WorkspaceConfig;
     use rpi_core::test_support::bind_loopback;
     use tower::ServiceExt;
 
@@ -887,6 +1000,81 @@ mod tests {
             ..RuntimeConfig::default()
         };
         (router(AgentRuntime::new(config).await.unwrap()), dir)
+    }
+
+    #[tokio::test]
+    async fn workspace_prefix_serves_isolated_runtime_and_unknown_ids_404() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("aux-ws")).unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            workspaces: vec![WorkspaceConfig {
+                id: "aux".into(),
+                name: "辅助工作区".into(),
+                path: dir.path().join("aux-ws"),
+                data_dir: dir.path().join("aux-data"),
+            }],
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let (app, extras) = attach_workspaces(runtime.clone(), router(runtime.clone()))
+            .await
+            .unwrap();
+        assert_eq!(extras.len(), 1);
+        for path in ["/w/aux", "/w/aux/api/health", "/w/aux/api/sessions"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+        // 浏览器默认访问的 /w/aux/ 由 fallback 308 到无尾斜杠形态。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/w/aux/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get(header::LOCATION),
+            Some(&header::HeaderValue::from_static("/w/aux"))
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/w/ghost/api/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        // 前缀路由命中独立运行时：aux 的 /api/workspaces 首项指向其自身 workspace。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/w/aux/api/workspaces")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let workspaces: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        // 运行时会把 workspace 解析为 canonical 路径（Windows 带 \\?\ 前缀），只断言目标目录名。
+        assert!(workspaces[0]["path"].as_str().unwrap().ends_with("aux-ws"));
+        runtime.shutdown().await.unwrap();
+        extras[0].shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1537,6 +1725,155 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn session_patch_delete_and_static_assets_served() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let handle = runtime
+            .sessions_store
+            .create_or_get(None, "系统指令".into())
+            .await
+            .unwrap();
+        let session_id;
+        {
+            let mut s = handle.lock().await;
+            session_id = s.id.clone();
+            s.messages.push(json!({"role":"user","content":"补丁会话"}));
+            runtime.sessions_store.commit(&s).await.unwrap();
+        }
+        let app = router(runtime.clone());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"title":"新标题"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let patched: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(patched["title"], "新标题");
+        assert_eq!(patched["archived"], false);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"archived":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let patched: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(patched["archived"], true);
+        // 汇总列表同步暴露 archived。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let summaries: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 256 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(summaries[0]["archived"], true);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let deleted: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(deleted["deleted"][0], session_id);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        // 空补丁与未知会话的错误契约。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // 重构后的静态资源：模块与组件 CSS 可达，旧入口下线。
+        for path in [
+            "/js/main.js",
+            "/js/timeline/render.js",
+            "/js/trajectory/render.js",
+            "/ui/tokens.css",
+            "/ui/components.css",
+            "/app.css",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder().uri(path).body(Body::empty()).unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/style.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         runtime.shutdown().await.unwrap();
     }
 

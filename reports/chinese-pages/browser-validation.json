@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-22T17:24:48.379Z",
+  "generated_at": "2026-10-26T19:16:26.433Z",
   "base": "http://127.0.0.1:374",
   "checks": [
     {
@@ -81,7 +81,7 @@
     {
       "name": "真实下载文件为 UTF-8 BOM 且与预览逐字一致",
       "passed": true,
-      "filename": "rpi-确认执行计划-2026-10-23.txt",
+      "filename": "rpi-确认执行计划-2026-10-27.txt",
       "bytes": 16385
     },
     {

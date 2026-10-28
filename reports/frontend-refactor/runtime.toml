@@ -1,0 +1,64 @@
+# GUI 验收运行时：模型请求经本地回环转发器（forwarder.py 9600 -> wuyou 网关），
+# 因为网络策略禁止对非回环主机使用明文 HTTP。
+workspace = 'D:\ddcode\rpi'
+data_dir = 'D:\ddcode\rpi\reports\frontend-refactor\runtime-data'
+http_bind = '127.0.0.1:3777'
+durable_logs = false
+log_content = true
+streaming = true
+
+[[models]]
+id = 'deepseek-v4-flash'
+model = 'DeepSeek-V4-Flash'
+provider = 'chat_completions'
+tier = 'nano'
+base_url = 'http://127.0.0.1:9600/v1'
+api_key_env = 'WUYOU_API_KEY'
+streaming = true
+context_window = 128000
+max_output_tokens = 4096
+
+[[models]]
+id = 'glm-5.3-flash'
+model = 'glm-5.3-flash'
+provider = 'chat_completions'
+tier = 'fast'
+base_url = 'http://127.0.0.1:9600/v1'
+api_key_env = 'WUYOU_API_KEY'
+streaming = true
+context_window = 128000
+max_output_tokens = 4096
+supports_reasoning = true
+
+[[models]]
+id = 'gpt-6-astra'
+model = 'gpt-6-astra'
+provider = 'chat_completions'
+tier = 'balanced'
+base_url = 'http://127.0.0.1:9600/v1'
+api_key_env = 'WUYOU_API_KEY'
+streaming = true
+context_window = 200000
+max_output_tokens = 4096
+
+[[models]]
+id = 'gpt-6.1-sol'
+model = 'gpt-6.1-sol'
+provider = 'chat_completions'
+tier = 'reasoning'
+base_url = 'http://127.0.0.1:9600/v1'
+api_key_env = 'WUYOU_API_KEY'
+streaming = true
+context_window = 200000
+max_output_tokens = 8192
+
+[[models]]
+id = 'claude-sonnet-5-5'
+model = 'claude-sonnet-5-5'
+provider = 'chat_completions'
+tier = 'frontier'
+base_url = 'http://127.0.0.1:9600/v1'
+api_key_env = 'WUYOU_API_KEY'
+streaming = true
+context_window = 200000
+max_output_tokens = 8192
