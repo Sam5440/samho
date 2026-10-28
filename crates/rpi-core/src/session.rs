@@ -28,6 +28,8 @@ pub struct Session {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub fork_cutoff: Option<usize>,
+    #[serde(default)]
+    pub archived: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -40,6 +42,7 @@ pub struct SessionSummary {
     pub message_count: usize,
     pub parent_id: Option<String>,
     pub fork_cutoff: Option<usize>,
+    pub archived: bool,
 }
 impl From<&Session> for SessionSummary {
     fn from(s: &Session) -> Self {
@@ -53,6 +56,7 @@ impl From<&Session> for SessionSummary {
             message_count: s.messages.len(),
             parent_id: s.parent_id.clone(),
             fork_cutoff: s.fork_cutoff,
+            archived: s.archived,
         }
     }
 }
@@ -69,6 +73,7 @@ impl Session {
             last_model: None,
             parent_id: None,
             fork_cutoff: None,
+            archived: false,
         }
     }
 }
@@ -286,6 +291,8 @@ struct Meta {
     parent_id: Option<String>,
     #[serde(default)]
     fork_cutoff: Option<usize>,
+    #[serde(default)]
+    archived: bool,
 }
 impl Meta {
     fn from_session(s: &Session) -> Self {
@@ -298,6 +305,7 @@ impl Meta {
             last_model: s.last_model.clone(),
             parent_id: s.parent_id.clone(),
             fork_cutoff: s.fork_cutoff,
+            archived: s.archived,
         }
     }
     fn project(self, messages: Vec<Value>) -> Session {
@@ -311,6 +319,7 @@ impl Meta {
             messages,
             parent_id: self.parent_id,
             fork_cutoff: self.fork_cutoff,
+            archived: self.archived,
         }
     }
 }
@@ -571,6 +580,7 @@ impl SessionStore {
             last_model: parent.last_model.clone(),
             parent_id: Some(parent_id.into()),
             fork_cutoff: Some(cutoff),
+            archived: false,
         };
         self.commit(&child).await?;
         drop(parent);
@@ -579,6 +589,97 @@ impl SessionStore {
             .await
             .insert(id, Arc::new(Mutex::new(child.clone())));
         Ok(child)
+    }
+    /// Metadata-only updates ride the same checksum-chained delta journal as
+    /// message commits, so renames and archive flags survive restarts.
+    pub async fn rename(&self, id: &str, title: String) -> Result<Session> {
+        self.update_metadata(id, |s| s.title = title).await
+    }
+    pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session> {
+        self.update_metadata(id, |s| s.archived = archived).await
+    }
+    async fn update_metadata(
+        &self,
+        id: &str,
+        apply: impl FnOnce(&mut Session),
+    ) -> Result<Session> {
+        let handle = self
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .context("unknown session")?;
+        let mut s = handle.lock().await;
+        apply(&mut s);
+        s.updated_at = now_ms();
+        self.commit(&s).await?;
+        Ok(s.clone())
+    }
+    /// Removes a session and every fork descendant. The journal is rewritten
+    /// as one full-snapshot delta per surviving session, so the checksum chain
+    /// stays verifiable across restarts.
+    pub async fn delete_cascade(&self, id: &str) -> Result<Vec<String>> {
+        let mut sessions = self.sessions.lock().await;
+        if !sessions.contains_key(id) {
+            bail!("unknown session {id}");
+        }
+        let mut j = self.journal.lock().await;
+        let mut doomed: std::collections::BTreeSet<String> = std::iter::once(id.to_string()).collect();
+        loop {
+            let mut grew = false;
+            for s in j.committed.values() {
+                if let Some(parent) = &s.parent_id
+                    && doomed.contains(parent)
+                    && doomed.insert(s.id.clone())
+                {
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        for did in &doomed {
+            if let Some(handle) = sessions.get(did) {
+                let s = handle.lock().await;
+                if s.status == "running" {
+                    bail!("cannot delete a running session");
+                }
+            }
+        }
+        let mut records = Vec::new();
+        let mut sequence = 0u64;
+        let mut checksum = String::new();
+        let mut committed = BTreeMap::new();
+        for (sid, s) in j.committed.iter() {
+            if doomed.contains(sid) {
+                continue;
+            }
+            let payload = Delta {
+                schema_version: SESSION_SCHEMA_VERSION,
+                sequence: sequence + 1,
+                previous_checksum: checksum.clone(),
+                metadata: Meta::from_session(s),
+                truncate_to: 0,
+                append_messages: s.messages.clone(),
+            };
+            checksum = digest(&payload)?;
+            sequence += 1;
+            records.push(serde_json::to_vec(&Record {
+                payload,
+                checksum: checksum.clone(),
+            })?);
+            committed.insert(sid.clone(), s.clone());
+        }
+        self.backend.replace(&records, self.durable).await?;
+        j.sequence = sequence;
+        j.checksum = checksum;
+        j.committed = committed;
+        for did in &doomed {
+            sessions.remove(did);
+        }
+        Ok(doomed.into_iter().collect())
     }
     pub async fn list(&self) -> Result<Vec<Session>> {
         let items: Vec<_> = self.sessions.lock().await.values().cloned().collect();
@@ -619,5 +720,110 @@ impl SessionStore {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::Redactor;
+    use serde_json::json;
+
+    async fn store(dir: &Path) -> SessionStore {
+        let backend = Arc::new(
+            FileJournalBackend::open(dir.join("sessions.jsonl"))
+                .await
+                .unwrap(),
+        );
+        SessionStore::open_with_backend(backend, Redactor::new(Vec::new()), false)
+            .await
+            .unwrap()
+    }
+
+    async fn seed_session(store: &SessionStore, title: &str) -> Session {
+        let handle = store
+            .create_or_get(None, "系统指令".into())
+            .await
+            .unwrap();
+        let mut s = handle.lock().await;
+        s.title = title.into();
+        s.messages
+            .push(json!({"role":"user","content":format!("{title} 的提问")}));
+        s.messages
+            .push(json!({"role":"assistant","content":"回答"}));
+        store.commit(&s).await.unwrap();
+        s.clone()
+    }
+
+    #[tokio::test]
+    async fn rename_and_archive_persist_through_journal_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.jsonl");
+        let store = store(dir.path()).await;
+        let s = seed_session(&store, "原始标题").await;
+
+        let renamed = store.rename(&s.id, "新标题".into()).await.unwrap();
+        assert_eq!(renamed.title, "新标题");
+        let archived = store.set_archived(&s.id, true).await.unwrap();
+        assert!(archived.archived);
+
+        // 重放 journal：元数据变更必须与内存状态一致。
+        let reopened = SessionStore::open(&path, Redactor::new(Vec::new()), false)
+            .await
+            .unwrap();
+        let reloaded = reopened.get(&s.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.title, "新标题");
+        assert!(reloaded.archived);
+        assert_eq!(reloaded.messages.len(), 3);
+        let summary = reopened
+            .list_summaries()
+            .await
+            .into_iter()
+            .find(|v| v.id == s.id)
+            .unwrap();
+        assert!(summary.archived);
+    }
+
+    #[tokio::test]
+    async fn delete_cascade_removes_fork_descendants_and_stays_replayable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.jsonl");
+        let store = store(dir.path()).await;
+        let parent = seed_session(&store, "父会话").await;
+        let survivor = seed_session(&store, "无关会话").await;
+        let child = store.fork(&parent.id, 3, Some("子分支".into())).await.unwrap();
+        let grandchild = store.fork(&child.id, 2, Some("孙分支".into())).await.unwrap();
+
+        let removed = store.delete_cascade(&parent.id).await.unwrap();
+        assert_eq!(removed.len(), 3);
+        assert!(removed.contains(&parent.id));
+        assert!(removed.contains(&child.id));
+        assert!(removed.contains(&grandchild.id));
+        assert!(store.get(&parent.id).await.unwrap().is_none());
+        assert!(store.get(&grandchild.id).await.unwrap().is_none());
+        assert!(store.get(&survivor.id).await.unwrap().is_some());
+
+        // 重放重写后的 journal：checksum 链完整，幸存会话消息无损。
+        let reopened = SessionStore::open(&path, Redactor::new(Vec::new()), false)
+            .await
+            .unwrap();
+        let kept = reopened.get(&survivor.id).await.unwrap().unwrap();
+        assert_eq!(kept.title, "无关会话");
+        assert_eq!(kept.messages.len(), 3);
+        assert_eq!(reopened.list_summaries().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn delete_rejects_running_sessions_and_unknown_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path()).await;
+        let s = seed_session(&store, "运行中").await;
+        {
+            let handle = store.sessions.lock().await.get(&s.id).cloned().unwrap();
+            handle.lock().await.status = "running".into();
+        }
+        assert!(store.delete_cascade(&s.id).await.is_err());
+        assert!(store.delete_cascade("missing").await.is_err());
+        assert!(store.get(&s.id).await.unwrap().is_some());
     }
 }
