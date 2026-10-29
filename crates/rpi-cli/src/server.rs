@@ -10,7 +10,7 @@ use axum::{
         Html, IntoResponse, Response, Sse,
         sse::{Event, KeepAlive},
     },
-    routing::{get, post},
+    routing::{any, delete, get, patch, post},
 };
 use futures_util::{FutureExt, stream};
 use rpi_core::{AgentRuntime, TaskRequest};
@@ -21,11 +21,15 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 #[derive(Clone)]
-struct AppState {
-    runtime: Arc<AgentRuntime>,
+pub(crate) struct AppState {
+    pub(crate) runtime: Arc<AgentRuntime>,
     tasks: Arc<RwLock<BTreeMap<String, TaskEntry>>>,
-    shutdown: CancellationToken,
+    pub(crate) shutdown: CancellationToken,
     ui: Arc<RwLock<rpi_core::config::UiConfig>>,
+    /// 动态工作区注册表（仅默认工作区持有；嵌套前缀为 None）。
+    pub(crate) hub: Option<Arc<crate::hub::HubState>>,
+    /// 每工作区独立 PTY 终端池。
+    pub(crate) terms: std::sync::Arc<crate::term::TermHub>,
 }
 
 struct TaskEntry {
@@ -35,12 +39,15 @@ struct TaskEntry {
 }
 
 impl AppState {
-    fn new(runtime: Arc<AgentRuntime>) -> Self {
+    pub(crate) fn new(runtime: Arc<AgentRuntime>) -> Self {
+        let terms = crate::term::TermHub::new(runtime.config.workspace.clone());
         Self {
             ui: Arc::new(RwLock::new(runtime.config.ui.clone())),
             runtime,
             tasks: Arc::new(RwLock::new(BTreeMap::new())),
             shutdown: CancellationToken::new(),
+            hub: None,
+            terms,
         }
     }
 
@@ -97,7 +104,8 @@ struct TaskSnapshot {
 }
 
 type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
-struct ApiError(StatusCode, String);
+#[derive(Debug)]
+pub(crate) struct ApiError(pub(crate) StatusCode, pub(crate) String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -118,29 +126,174 @@ pub fn router(runtime: Arc<AgentRuntime>) -> Router {
 
 // 内嵌静态资源白名单：UI 重构后前端拆分为 ES Modules + 组件化 CSS。
 const STATIC_ASSETS: &[(&str, &str, &str)] = &[
-    ("/index.html", "text/html; charset=utf-8", include_str!("../../../web/index.html")),
-    ("/ui/tokens.css", "text/css; charset=utf-8", include_str!("../../../web/ui/tokens.css")),
-    ("/ui/base.css", "text/css; charset=utf-8", include_str!("../../../web/ui/base.css")),
-    ("/ui/components.css", "text/css; charset=utf-8", include_str!("../../../web/ui/components.css")),
-    ("/app.css", "text/css; charset=utf-8", include_str!("../../../web/app.css")),
-    ("/js/main.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/main.js")),
-    ("/js/api.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/api.js")),
-    ("/js/store.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/store.js")),
-    ("/js/ui.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/ui.js")),
-    ("/js/markdown.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/markdown.js")),
-    ("/js/sessions.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/sessions.js")),
-    ("/js/composer.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/composer.js")),
-    ("/js/model-select.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/model-select.js")),
-    ("/js/timeline/projection.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/projection.js")),
-    ("/js/timeline/render.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/render.js")),
-    ("/js/timeline/tools.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/timeline/tools.js")),
-    ("/js/trajectory/render.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/trajectory/render.js")),
-    ("/js/trajectory/expansion.js", "text/javascript; charset=utf-8", include_str!("../../../web/js/trajectory/expansion.js")),
+    (
+        "/index.html",
+        "text/html; charset=utf-8",
+        include_str!("../../../web/index.html"),
+    ),
+    (
+        "/ui/tokens.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/ui/tokens.css"),
+    ),
+    (
+        "/ui/base.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/ui/base.css"),
+    ),
+    (
+        "/ui/components.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/ui/components.css"),
+    ),
+    (
+        "/ui/cult.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/ui/cult.css"),
+    ),
+    (
+        "/app.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/app.css"),
+    ),
+    (
+        "/js/main.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/main.js"),
+    ),
+    (
+        "/js/api.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/api.js"),
+    ),
+    (
+        "/js/store.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/store.js"),
+    ),
+    (
+        "/js/ui.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/ui.js"),
+    ),
+    (
+        "/js/markdown.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/markdown.js"),
+    ),
+    (
+        "/js/sessions.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/sessions.js"),
+    ),
+    (
+        "/js/sidebar.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/sidebar.js"),
+    ),
+    (
+        "/js/panels/files.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/files.js"),
+    ),
+    (
+        "/js/panels/git.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/git.js"),
+    ),
+    (
+        "/js/panels/browser.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/browser.js"),
+    ),
+    (
+        "/js/projects.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/projects.js"),
+    ),
+    (
+        "/js/composer.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/composer.js"),
+    ),
+    (
+        "/js/model-select.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/model-select.js"),
+    ),
+    (
+        "/js/timeline/projection.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/timeline/projection.js"),
+    ),
+    (
+        "/js/timeline/render.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/timeline/render.js"),
+    ),
+    (
+        "/js/timeline/tools.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/timeline/tools.js"),
+    ),
+    (
+        "/js/trajectory/render.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/trajectory/render.js"),
+    ),
+    (
+        "/js/trajectory/expansion.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/trajectory/expansion.js"),
+    ),
+    (
+        "/js/motion.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/motion.js"),
+    ),
+    (
+        "/js/cult/gridbeam.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/cult/gridbeam.js"),
+    ),
+    (
+        "/vendor/xterm.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/vendor/xterm.js"),
+    ),
+    (
+        "/vendor/xterm-addon-canvas.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/vendor/xterm-addon-canvas.js"),
+    ),
+    (
+        "/vendor/xterm.css",
+        "text/css; charset=utf-8",
+        include_str!("../../../web/vendor/xterm.css"),
+    ),
+    (
+        "/js/workspaces.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/workspaces.js"),
+    ),
+    (
+        "/js/dock.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/dock.js"),
+    ),
+    (
+        "/js/panels/terminal.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/terminal.js"),
+    ),
 ];
 
-fn router_with_state(app: AppState) -> Router {
+pub(crate) fn router_with_state(app: AppState) -> Router {
     let mut router = Router::new()
-        .route("/", get(|| async { Html(include_str!("../../../web/index.html")) }))
+        .route(
+            "/",
+            get(|| async { Html(include_str!("../../../web/index.html")) }),
+        )
         .route(
             "/docs",
             get(|| async { Html(include_str!("../../../web/docs.html")) }),
@@ -202,14 +355,25 @@ fn router_with_state(app: AppState) -> Router {
                 )
             }),
         )
-        .route("/api/health", get(|| async { Json(json!({"status":"ok","api_version":1})) }))
+        .route(
+            "/api/health",
+            get(|| async { Json(json!({"status":"ok","api_version":1})) }),
+        )
         .route("/api/state", get(state))
         .route("/api/models", get(models))
         .route("/api/objects", get(objects))
         .route("/api/skills", get(skills))
         .route("/api/sessions", get(sessions))
-        .route("/api/sessions/{id}", get(session).patch(patch_session).delete(delete_session))
+        .route(
+            "/api/sessions/{id}",
+            get(session).patch(patch_session).delete(delete_session),
+        )
         .route("/api/sessions/{id}/fork", post(fork_session))
+        .route("/api/projects", get(list_projects).post(create_project))
+        .route(
+            "/api/projects/{id}",
+            get(get_project).patch(patch_project).delete(delete_project),
+        )
         .route("/api/run", post(run_task))
         .route("/api/tasks/{id}", get(task))
         .route("/api/tasks/{id}/cancel", post(cancel_task))
@@ -222,19 +386,49 @@ fn router_with_state(app: AppState) -> Router {
         .route("/api/traces/{id}/timeline", get(trace_timeline))
         .route("/api/traces/{id}/export", get(trace_export))
         .route("/api/ui", get(ui).put(update_ui))
-        .route("/api/workspaces", get(workspaces))
-        .route("/api/skills/refresh", post(refresh_skills));
+        .route(
+            "/api/workspaces",
+            get(workspaces).post(crate::hub::workspace_create),
+        )
+        .route(
+            "/api/workspaces/{id}",
+            patch(crate::hub::workspace_rename).delete(crate::hub::workspace_remove),
+        )
+        .route("/w/{id}", any(crate::hub::workspace_dispatch))
+        .route("/w/{id}/{*rest}", any(crate::hub::workspace_dispatch))
+        .route("/api/term", post(crate::term::term_open))
+        .route("/api/term/{id}/stream", get(crate::term::term_stream))
+        .route("/api/term/{id}/input", post(crate::term::term_input))
+        .route("/api/term/{id}/resize", post(crate::term::term_resize))
+        .route("/api/term/{id}", delete(crate::term::term_close))
+        .route("/api/skills/refresh", post(refresh_skills))
+        .route(
+            "/api/fs",
+            get(crate::panels::fs_list).delete(crate::panels::fs_delete),
+        )
+        .route(
+            "/api/file",
+            get(crate::panels::file_read).put(crate::panels::file_write),
+        )
+        .route("/api/file/raw", get(crate::panels::file_raw))
+        .route("/api/fs/mkdir", post(crate::panels::fs_mkdir))
+        .route("/api/fs/rename", post(crate::panels::fs_rename))
+        .route("/api/git/status", get(crate::panels::git_status))
+        .route("/api/git/diff", get(crate::panels::git_diff))
+        .route("/api/git/log", get(crate::panels::git_log))
+        .route("/api/git/branches", get(crate::panels::git_branches))
+        .route("/api/git/stage", post(crate::panels::git_stage))
+        .route("/api/git/unstage", post(crate::panels::git_unstage))
+        .route("/api/git/commit", post(crate::panels::git_commit))
+        .route("/api/git/checkout", post(crate::panels::git_checkout))
+        .route("/api/git/discard", post(crate::panels::git_discard))
+        .route("/api/proxy", get(crate::panels::proxy));
     for (path, mime, body) in STATIC_ASSETS {
         let mime = *mime;
         let body = *body;
         router = router.route(
             path,
-            get(move || async move {
-                (
-                    [(header::CONTENT_TYPE, mime)],
-                    body,
-                )
-            }),
+            get(move || async move { ([(header::CONTENT_TYPE, mime)], body) }),
         );
     }
     router
@@ -283,7 +477,17 @@ async fn local_origin(request: Request, next: Next) -> Response {
     response
         .headers_mut()
         .insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
-    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'".parse().unwrap());
+    // 内嵌前端随二进制发布：禁止缓存，升级后旧模块不得残留（回环本地服务无带宽顾虑）。
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    // /api/proxy 自带面向远端页面的专用 CSP（禁脚本、放行样式/图片），不得覆盖。
+    if !response
+        .headers()
+        .contains_key(header::CONTENT_SECURITY_POLICY)
+    {
+        response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, "default-src 'self'; connect-src 'self'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'; frame-src http: https:; frame-ancestors 'none'; base-uri 'none'".parse().unwrap());
+    }
     response
 }
 
@@ -291,7 +495,7 @@ async fn local_origin(request: Request, next: Next) -> Response {
 // 工作台前端按 location.pathname 推导同前缀 API 路径。
 // axum 0.8 的 nest 匹配 /w/{id} 与子路径，但不匹配 /w/{id}/（尾斜杠）；
 // 路由匹配先于中间件执行，无法用层重写 URI，因此在 fallback 里对尾斜杠形态 308 重定向。
-async fn workspace_fallback(uri: axum::http::Uri) -> Response {
+pub(crate) async fn workspace_fallback(uri: axum::http::Uri) -> Response {
     let path = uri.path();
     if path.starts_with("/w/") && path.ends_with('/') && path.len() > 4 {
         let trimmed = path.trim_end_matches('/');
@@ -342,8 +546,14 @@ pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
         listener.local_addr()?
     );
     let app = AppState::new(runtime.clone());
+    // 动态工作区注册表：恢复上次保存的条目并挂到默认 AppState 上。
+    let hub = crate::hub::HubState::new(runtime.config.data_dir.join("workspaces.json"));
+    hub.load_saved(runtime.config.clone()).await;
+    let mut app_state = app.clone();
+    app_state.hub = Some(Arc::new(hub.clone()));
+    let default_terms = app_state.terms.clone();
     let (router, extra_runtimes) =
-        attach_workspaces(runtime, router_with_state(app.clone())).await?;
+        attach_workspaces(runtime, router_with_state(app_state.clone())).await?;
     let shutdown_state = app.clone();
     let outcome = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
@@ -356,6 +566,8 @@ pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
     for workspace_runtime in extra_runtimes {
         workspace_runtime.shutdown().await?;
     }
+    hub.shutdown_all().await;
+    default_terms.shutdown_all().await;
     outcome?;
     Ok(())
 }
@@ -405,11 +617,23 @@ async fn session(State(app): State<AppState>, Path(id): Path<String>) -> ApiResu
     }
 }
 
+// 双层 Option 的区分反序列化：字段缺省 → None（保持不变），显式 null → Some(None)（清除）。
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionPatch {
     title: Option<String>,
     archived: Option<bool>,
+    // 缺省=保持不变；null=移出项目；字符串=归属指定项目。
+    #[serde(default, deserialize_with = "deserialize_some")]
+    project_id: Option<Option<String>>,
 }
 
 async fn patch_session(
@@ -419,6 +643,12 @@ async fn patch_session(
 ) -> ApiResult<Value> {
     if app.runtime.session(&id).await?.is_none() {
         return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    if let Some(project_id) = &body.project_id
+        && let Some(pid) = project_id
+        && app.runtime.projects.get(pid).await.is_none()
+    {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "项目不存在".into()));
     }
     let mut updated = None;
     if let Some(title) = &body.title {
@@ -446,19 +676,25 @@ async fn patch_session(
                 .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?,
         );
     }
+    if let Some(project_id) = body.project_id {
+        updated = Some(
+            app.runtime
+                .sessions_store
+                .set_project(&id, project_id)
+                .await
+                .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?,
+        );
+    }
     match updated {
         Some(session) => Ok(Json(app.redact(json!(session)))),
         None => Err(ApiError(
             StatusCode::BAD_REQUEST,
-            "请求体至少包含 title 或 archived".into(),
+            "请求体至少包含 title、archived 或 project_id".into(),
         )),
     }
 }
 
-async fn delete_session(
-    State(app): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Value> {
+async fn delete_session(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     if app.runtime.session(&id).await?.is_none() {
         return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
     }
@@ -469,6 +705,102 @@ async fn delete_session(
         .await
         .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
     Ok(Json(json!({"deleted": removed})))
+}
+
+// ---------- 项目分类管理 ----------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectCreate {
+    name: String,
+    #[serde(default)]
+    color: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectPatch {
+    name: Option<String>,
+    // 缺省=保持不变；null=清除颜色；字符串=设置颜色。
+    #[serde(default, deserialize_with = "deserialize_some")]
+    color: Option<Option<String>>,
+}
+
+fn invalid_input(error: &anyhow::Error) -> ApiError {
+    ApiError(StatusCode::BAD_REQUEST, error.to_string())
+}
+
+async fn list_projects(State(app): State<AppState>) -> ApiResult<Value> {
+    Ok(Json(app.redact(json!(app.runtime.projects.list().await))))
+}
+
+async fn get_project(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    match app.runtime.projects.get(&id).await {
+        Some(project) => Ok(Json(app.redact(json!(project)))),
+        None => Err(ApiError(StatusCode::NOT_FOUND, "项目不存在".into())),
+    }
+}
+
+async fn create_project(
+    State(app): State<AppState>,
+    Json(body): Json<ProjectCreate>,
+) -> std::result::Result<(StatusCode, Json<Value>), ApiError> {
+    let name = rpi_core::projects::validate_name(&body.name).map_err(|e| invalid_input(&e))?;
+    let color = rpi_core::projects::validate_color(body.color).map_err(|e| invalid_input(&e))?;
+    let project = app
+        .runtime
+        .projects
+        .create(name, color)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    Ok((StatusCode::CREATED, Json(app.redact(json!(project)))))
+}
+
+async fn patch_project(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ProjectPatch>,
+) -> ApiResult<Value> {
+    if app.runtime.projects.get(&id).await.is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "项目不存在".into()));
+    }
+    if let Some(name) = &body.name {
+        rpi_core::projects::validate_name(name).map_err(|e| invalid_input(&e))?;
+    }
+    if let Some(color) = &body.color {
+        rpi_core::projects::validate_color(color.clone()).map_err(|e| invalid_input(&e))?;
+    }
+    let project = app
+        .runtime
+        .projects
+        .update(&id, body.name, body.color)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    Ok(Json(app.redact(json!(project))))
+}
+
+async fn delete_project(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let project = app
+        .runtime
+        .projects
+        .delete(&id)
+        .await
+        .map_err(|e| ApiError(StatusCode::NOT_FOUND, e.to_string()))?;
+    // 会话本身保留，仅回到未分类。
+    let mut cleared = 0u64;
+    for summary in app.runtime.session_summaries().await {
+        if summary.project_id.as_deref() == Some(id.as_str()) {
+            app.runtime
+                .sessions_store
+                .set_project(&summary.id, None)
+                .await
+                .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+            cleared += 1;
+        }
+    }
+    Ok(Json(
+        json!({"deleted": {"id": project.id, "name": project.name}, "sessions_cleared": cleared}),
+    ))
 }
 
 async fn run_task(
@@ -845,15 +1177,29 @@ fn validate_ui(config: &rpi_core::config::UiConfig) -> std::result::Result<(), S
 }
 async fn workspaces(State(app): State<AppState>) -> Json<Value> {
     let mut entries = vec![
-        json!({"id":"default","name":"默认工作区","path":app.runtime.config.workspace,"url":"/"}),
+        json!({"id":"default","name":"默认工作区","path":app.runtime.config.workspace,"url":"/","managed":false}),
     ];
     entries.extend(
         app.runtime
             .config
             .workspaces
             .iter()
-            .map(|w| json!({"id":w.id,"name":w.name,"path":w.path,"url":format!("/w/{}/",w.id)})),
+            .map(|w| {
+                json!({"id":w.id,"name":w.name,"path":w.path,"url":format!("/w/{}/",w.id),"managed":false})
+            }),
     );
+    // 根服务附带动态注册表；嵌套前缀（hub=None）保持各自独立视图。
+    if let Some(hub) = app.hub.as_ref() {
+        for (id, entry) in hub.dynamic.read().await.iter() {
+            entries.push(json!({
+                "id": id,
+                "name": entry.name,
+                "path": entry.runtime.config.workspace,
+                "url": format!("/w/{id}/"),
+                "managed": true,
+            }));
+        }
+    }
     Json(app.redact(json!(entries)))
 }
 async fn refresh_skills(State(app): State<AppState>) -> ApiResult<Value> {
@@ -1000,6 +1346,148 @@ mod tests {
             ..RuntimeConfig::default()
         };
         (router(AgentRuntime::new(config).await.unwrap()), dir)
+    }
+
+    async fn hub_fixture() -> (Router, tempfile::TempDir, Arc<crate::hub::HubState>) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let hub = Arc::new(crate::hub::HubState::new(
+            runtime.config.data_dir.join("workspaces.json"),
+        ));
+        let mut app_state = AppState::new(runtime.clone());
+        app_state.hub = Some(hub.clone());
+        let (router, _) = attach_workspaces(runtime, router_with_state(app_state))
+            .await
+            .unwrap();
+        (router, dir, hub)
+    }
+
+    #[tokio::test]
+    async fn dynamic_workspaces_dispatch_isolate_and_remove() {
+        let (router, dir, _hub) = hub_fixture().await;
+        std::fs::create_dir_all(dir.path().join("target-ws")).unwrap();
+        let payload = json!({ "path": dir.path().join("target-ws").to_string_lossy() });
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        let id = body["id"].as_str().unwrap().to_string();
+        assert_ne!(id, "default");
+        // 分发命中独立运行时：会话列表为空数组。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/w/{id}/api/sessions"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body_bytes = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "dispatch body: {}",
+            String::from_utf8_lossy(&body_bytes)
+        );
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body, json!([]));
+        // 嵌套路由带 Path 提取器的接口经分发必须正常（外层参数不得泄漏进内层）。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/w/{id}/api/sessions/no-such-session"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "nested Path extractor through dispatch must 404, not 500"
+        );
+        // 合并列表含动态项且 managed=true。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["id"] == id && w["managed"] == json!(true))
+        );
+        // 摘除后 404。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/workspaces/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/w/{id}/api/sessions"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn dynamic_workspace_create_rejects_missing_path() {
+        let (router, _dir, _hub) = hub_fixture().await;
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Z:/definitely/missing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -1857,9 +2345,7 @@ mod tests {
         ] {
             let response = app
                 .clone()
-                .oneshot(
-                    Request::builder().uri(path).body(Body::empty()).unwrap(),
-                )
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
@@ -1874,6 +2360,184 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn projects_classify_sessions_and_cascade_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let handle = runtime
+            .sessions_store
+            .create_or_get(None, "系统指令".into())
+            .await
+            .unwrap();
+        let session_id = handle.lock().await.id.clone();
+        let app = router(runtime.clone());
+
+        // 创建项目：校验 + 重复名拒绝。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/projects")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r##"{"name":"前端重构","color":"#7FAE32"}"##))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let project: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        let project_id = project["id"].as_str().unwrap().to_string();
+        assert_eq!(project["color"], "#7fae32");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/projects")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"前端重构"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/projects")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"","color":"blue"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // 会话归属项目：摘要同步携带 project_id。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(r#"{{"project_id":"{project_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let patched: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(patched["project_id"], project_id.as_str());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let summaries: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 256 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(summaries[0]["project_id"], project_id.as_str());
+
+        // 未知项目拒绝；null 清除归属。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"project_id":"missing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"project_id":null}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let patched: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(patched["project_id"], Value::Null);
+
+        // 归属回来再删除项目：会话回到未分类。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(r#"{{"project_id":"{project_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/projects/{project_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let deleted: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(deleted["sessions_cleared"], 1);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{session_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let session: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(session["project_id"], Value::Null);
         runtime.shutdown().await.unwrap();
     }
 

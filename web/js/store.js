@@ -13,10 +13,12 @@ export const state = {
   models: [],
   tiers: [],
   sessions: [],
+  projects: [],
   objects: [],
   skills: [],
   mcp: null,
   workspace: '',
+  limits: null,                   // { max_turns, max_concurrent_tasks }（HaloProgress 确定态）
   ui: { theme: 'dark', submit_key: 'Ctrl+Enter', new_session_key: 'Alt+N', cancel_key: 'Ctrl+K' },
 
   currentSessionId: null,          // null = 草稿

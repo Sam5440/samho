@@ -142,7 +142,7 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
     class: 'composer',
     onsubmit: (event) => { event.preventDefault(); submitFlow(); },
   },
-    h('div', { class: 'composer-shell' },
+    h('div', { class: 'composer-shell', 'data-beam': 'ocean' },
       textarea,
       h('div', { class: 'composer-bar' },
         modelChip,

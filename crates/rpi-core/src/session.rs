@@ -30,6 +30,8 @@ pub struct Session {
     pub fork_cutoff: Option<usize>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -43,6 +45,8 @@ pub struct SessionSummary {
     pub parent_id: Option<String>,
     pub fork_cutoff: Option<usize>,
     pub archived: bool,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 impl From<&Session> for SessionSummary {
     fn from(s: &Session) -> Self {
@@ -57,6 +61,7 @@ impl From<&Session> for SessionSummary {
             parent_id: s.parent_id.clone(),
             fork_cutoff: s.fork_cutoff,
             archived: s.archived,
+            project_id: s.project_id.clone(),
         }
     }
 }
@@ -74,6 +79,7 @@ impl Session {
             parent_id: None,
             fork_cutoff: None,
             archived: false,
+            project_id: None,
         }
     }
 }
@@ -293,6 +299,8 @@ struct Meta {
     fork_cutoff: Option<usize>,
     #[serde(default)]
     archived: bool,
+    #[serde(default)]
+    project_id: Option<String>,
 }
 impl Meta {
     fn from_session(s: &Session) -> Self {
@@ -306,6 +314,7 @@ impl Meta {
             parent_id: s.parent_id.clone(),
             fork_cutoff: s.fork_cutoff,
             archived: s.archived,
+            project_id: s.project_id.clone(),
         }
     }
     fn project(self, messages: Vec<Value>) -> Session {
@@ -320,6 +329,7 @@ impl Meta {
             parent_id: self.parent_id,
             fork_cutoff: self.fork_cutoff,
             archived: self.archived,
+            project_id: self.project_id,
         }
     }
 }
@@ -581,6 +591,8 @@ impl SessionStore {
             parent_id: Some(parent_id.into()),
             fork_cutoff: Some(cutoff),
             archived: false,
+            // 分支默认留在父会话的项目里。
+            project_id: parent.project_id.clone(),
         };
         self.commit(&child).await?;
         drop(parent);
@@ -598,11 +610,12 @@ impl SessionStore {
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session> {
         self.update_metadata(id, |s| s.archived = archived).await
     }
-    async fn update_metadata(
-        &self,
-        id: &str,
-        apply: impl FnOnce(&mut Session),
-    ) -> Result<Session> {
+    /// 项目归属走同一条元数据增量日志；None 表示移出项目。
+    pub async fn set_project(&self, id: &str, project_id: Option<String>) -> Result<Session> {
+        self.update_metadata(id, |s| s.project_id = project_id)
+            .await
+    }
+    async fn update_metadata(&self, id: &str, apply: impl FnOnce(&mut Session)) -> Result<Session> {
         let handle = self
             .sessions
             .lock()
@@ -625,7 +638,8 @@ impl SessionStore {
             bail!("unknown session {id}");
         }
         let mut j = self.journal.lock().await;
-        let mut doomed: std::collections::BTreeSet<String> = std::iter::once(id.to_string()).collect();
+        let mut doomed: std::collections::BTreeSet<String> =
+            std::iter::once(id.to_string()).collect();
         loop {
             let mut grew = false;
             for s in j.committed.values() {
@@ -741,10 +755,7 @@ mod tests {
     }
 
     async fn seed_session(store: &SessionStore, title: &str) -> Session {
-        let handle = store
-            .create_or_get(None, "系统指令".into())
-            .await
-            .unwrap();
+        let handle = store.create_or_get(None, "系统指令".into()).await.unwrap();
         let mut s = handle.lock().await;
         s.title = title.into();
         s.messages
@@ -791,8 +802,14 @@ mod tests {
         let store = store(dir.path()).await;
         let parent = seed_session(&store, "父会话").await;
         let survivor = seed_session(&store, "无关会话").await;
-        let child = store.fork(&parent.id, 3, Some("子分支".into())).await.unwrap();
-        let grandchild = store.fork(&child.id, 2, Some("孙分支".into())).await.unwrap();
+        let child = store
+            .fork(&parent.id, 3, Some("子分支".into()))
+            .await
+            .unwrap();
+        let grandchild = store
+            .fork(&child.id, 2, Some("孙分支".into()))
+            .await
+            .unwrap();
 
         let removed = store.delete_cascade(&parent.id).await.unwrap();
         assert_eq!(removed.len(), 3);

@@ -1,4 +1,7 @@
+mod hub;
+mod panels;
 mod server;
+mod term;
 mod tui;
 
 use std::{path::PathBuf, sync::Arc};

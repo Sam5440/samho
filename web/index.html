@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>rπ — 智能体工作台</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'12'%20fill%3D'%23151918'%2F%3E%3Ctext%20x%3D'9'%20y%3D'45'%20fill%3D'%23c7f17a'%20font-family%3D'Georgia%2Cserif'%20font-style%3D'italic'%20font-size%3D'41'%3Er%CF%80%3C%2Ftext%3E%3C%2Fsvg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'12'%20fill%3D'%230d0d0d'%2F%3E%3Ctext%20x%3D'9'%20y%3D'45'%20fill%3D'%23ffffff'%20font-family%3D'Georgia%2Cserif'%20font-style%3D'italic'%20font-size%3D'41'%3Er%CF%80%3C%2Ftext%3E%3C%2Fsvg%3E">
   <link rel="stylesheet" href="/ui/tokens.css">
   <link rel="stylesheet" href="/ui/base.css">
   <link rel="stylesheet" href="/ui/components.css">
+  <link rel="stylesheet" href="/ui/cult.css">
   <link rel="stylesheet" href="/app.css">
   <script type="module" src="/js/main.js"></script>
 </head>
@@ -19,6 +20,7 @@
       <nav class="topbar-nav" aria-label="项目资料"><a href="/docs">中文文档</a><a href="/plan">确认计划</a></nav>
       <span class="topbar-spacer"></span>
       <div class="connection"><span id="connection-dot" class="status-dot"></span><span id="connection-label">连接中</span></div>
+      <button id="toggle-dock" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="工具面板" title="工具面板" aria-pressed="false">◫</button>
       <button id="theme-toggle" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="切换主题" title="切换主题">◐</button>
       <button id="open-settings" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="界面设置" title="界面设置">⚙</button>
     </header>
@@ -26,6 +28,7 @@
     <aside class="sidebar" id="sidebar" aria-label="会话导航"></aside>
 
     <main class="main-panel">
+      <canvas id="gridbeam" class="gridbeam-canvas" aria-hidden="true" hidden></canvas>
       <div class="conversation-head">
         <div class="min-w-0">
           <h1 id="conversation-title" class="conversation-title">从一个任务开始</h1>
@@ -33,6 +36,7 @@
         </div>
         <div class="conversation-actions">
           <span id="task-state" class="task-state">就绪</span>
+          <span id="task-progress" role="progressbar" aria-label="任务轮次进度" hidden></span>
           <button id="fork-session" data-component="button" data-variant="outline" data-size="sm" disabled>分支会话</button>
           <button id="refresh-sessions" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="刷新会话" title="刷新会话列表">↻</button>
         </div>
@@ -41,21 +45,17 @@
       <div id="composer-host" class="composer-host"></div>
     </main>
 
-    <aside class="inspector" aria-label="运行时检查器">
-      <div class="inspector-head" data-component="tabs">
-        <div data-slot="tabs-list" role="tablist" aria-label="检查类型">
-          <button data-slot="tab" role="tab" data-panel="trajectory" data-state="active" aria-selected="true">轨迹</button>
-          <button data-slot="tab" role="tab" data-panel="objects" aria-selected="false">对象</button>
-          <button data-slot="tab" role="tab" data-panel="mcp" aria-selected="false">MCP</button>
-          <button data-slot="tab" role="tab" data-panel="skills" aria-selected="false">技能</button>
-        </div>
-        <span id="stream-status" class="text-ui-xs text-subtle" style="margin-inline-start: auto;">事件流 / —</span>
-      </div>
+    <aside class="inspector" id="inspector" aria-label="设备与运行时面板">
+      <div id="dock-head"></div>
       <div class="inspector-panels">
-        <section id="panel-trajectory" class="inspector-panel" role="tabpanel" aria-label="模型轨迹"></section>
-        <section id="panel-objects" class="inspector-panel" role="tabpanel" aria-label="对象注册表" hidden></section>
-        <section id="panel-mcp" class="inspector-panel" role="tabpanel" aria-label="MCP 服务" hidden></section>
-        <section id="panel-skills" class="inspector-panel" role="tabpanel" aria-label="技能库" hidden></section>
+        <section id="panel-files" class="inspector-panel is-dock" role="tabpanel" aria-label="文件管理" hidden></section>
+        <section id="panel-git" class="inspector-panel is-dock" role="tabpanel" aria-label="Git 审查" hidden></section>
+        <section id="panel-term" class="inspector-panel is-dock" role="tabpanel" aria-label="终端" hidden></section>
+        <section id="panel-browser" class="inspector-panel is-dock" role="tabpanel" aria-label="浏览器" hidden></section>
+        <section id="panel-trajectory" class="inspector-panel is-scroll" role="tabpanel" aria-label="模型轨迹" hidden></section>
+        <section id="panel-objects" class="inspector-panel is-scroll" role="tabpanel" aria-label="对象注册表" hidden></section>
+        <section id="panel-mcp" class="inspector-panel is-scroll" role="tabpanel" aria-label="MCP 服务" hidden></section>
+        <section id="panel-skills" class="inspector-panel is-scroll" role="tabpanel" aria-label="技能库" hidden></section>
       </div>
     </aside>
   </div>

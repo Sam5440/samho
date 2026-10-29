@@ -5,6 +5,7 @@ use crate::events::{EventLog, EventLogOptions, Redactor, TraceEvent, now_ms};
 use crate::mcp::{McpClientHooks, McpRegistry};
 use crate::model::{ModelRouter, TaskProfile, TaskRouter};
 use crate::object::{InvocationContext, Object, ObjectEnvelope, ObjectKind, ObjectRegistry};
+use crate::projects::ProjectStore;
 use crate::provider::{
     ModelObject, ModelProvider, ModelResponse, Provider, ProviderError, ProviderErrorKind,
     ProviderStreamEvent, Usage,
@@ -155,6 +156,7 @@ pub struct AgentRuntime {
     pub mcp: McpRegistry,
     pub tools: ToolRegistry,
     pub sessions_store: SessionStore,
+    pub projects: ProjectStore,
     provider: Provider,
     router: Arc<dyn TaskRouter>,
     projector: Arc<dyn ContextProjector>,
@@ -247,6 +249,8 @@ impl AgentRuntime {
             )
             .await?
         };
+        let projects =
+            ProjectStore::open(config.data_dir.join("projects.json"), config.durable_logs).await?;
         let network = builder
             .network
             .unwrap_or_else(|| Arc::new(config.network.clone()));
@@ -299,6 +303,7 @@ impl AgentRuntime {
             mcp,
             tools,
             sessions_store,
+            projects,
             _store_lock: store_lock,
         });
         runtime.tools.bind_objects(runtime.objects.clone());

@@ -4,26 +4,45 @@
 import { h, cn, button, badge, spinner, openMenu, openDialog, toast, bindTooltip, relativeTime } from './ui.js';
 import { api, apiPatch, apiPost, apiDelete } from './api.js';
 import { state, sortedSessions, groupSessions, on, emit } from './store.js';
+import { createProjectFilter, moveToProjectMenu, projectById, manageProjectsDialog, refreshProjects } from './projects.js';
 const titleText = (session) => String(session?.title || session?.id || '未命名会话');
 
-function statusDot(session, running) {
-  if (running) return h('span', { class: 'session-dot is-loading' }, spinner('0.8rem'));
-  const s = String(session?.status || 'ready');
-  if (s === 'failed' || s === 'error') return h('span', { class: 'session-dot is-error', title: '上次执行失败' });
-  if (s === 'interrupted') return h('span', { class: 'session-dot is-interrupted', title: '上次被中断' });
-  return h('span', { class: 'session-dot is-idle' });
-}
+  function statusDot(session, running) {
+    if (running) return h('span', { class: 'session-dot is-loading' }, spinner('0.8rem'));
+    const s = String(session?.status || 'ready');
+    if (s === 'failed' || s === 'error') return h('span', { class: 'session-dot is-error', title: '上次执行失败' });
+    if (s === 'interrupted') return h('span', { class: 'session-dot is-interrupted', title: '上次被中断' });
+    return h('span', { class: 'session-dot is-idle' });
+  }
+
+  function projectDot(session) {
+    const project = projectById(session.project_id);
+    if (!project) return null;
+    return h('span', {
+      class: 'project-chip-dot',
+      style: { background: project.color || 'var(--border-strong)' },
+      title: `项目：${project.name}`,
+    });
+  }
 
 export function createSessionSidebar({ container, onSelect, onNewSession }) {
   let filter = '';
   let currentId = state.currentSessionId;
   let archiveOpen = false;
+  let projectFilter = 'all';
 
   const searchInput = h('input', {
     'data-component': 'input',
     placeholder: '搜索会话…',
     spellcheck: 'false',
     oninput: () => { filter = searchInput.value.trim().toLowerCase(); render(); },
+  });
+  const projectChips = createProjectFilter({
+    onChange: (value) => { projectFilter = value; render(); },
+  });
+  const manageBtn = button('管理项目', {
+    'data-variant': 'ghost', 'data-size': 'sm',
+    onclick: () => manageProjectsDialog({ onChanged: () => render() }),
   });
   const list = h('nav', { class: 'session-list min-h-0', 'aria-label': '历史会话' });
   const newButton = button('＋ 新建任务', { 'data-variant': 'default', class: 'session-new', onclick: () => onNewSession?.() });
@@ -32,6 +51,7 @@ export function createSessionSidebar({ container, onSelect, onNewSession }) {
     const archived = Boolean(session.archived);
     openMenu(anchor, [
       { label: '打开会话', icon: '↗', onSelect: () => onSelect(session.id) },
+      { label: '移动到项目…', onSelect: () => moveToProjectMenu(session, anchor, () => refresh()) },
       '-',
       { label: '重命名', onSelect: () => renameDialog(session) },
       { label: '分支会话', onSelect: () => forkSession(session) },
@@ -106,21 +126,48 @@ export function createSessionSidebar({ container, onSelect, onNewSession }) {
     } catch (error) { toast(`分支失败：${error.message}`, 'error'); }
   }
 
-  function sessionRow(session) {
+  // 子对话树：父会话在列表内时子会话缩进挂载（fork 链），否则平铺。
+function treeRows(sessions) {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const children = new Map();
+  const roots = [];
+  for (const s of sessions) {
+    if (s.parent_id && byId.has(s.parent_id)) {
+      if (!children.has(s.parent_id)) children.set(s.parent_id, []);
+      children.get(s.parent_id).push(s);
+    } else {
+      roots.push(s);
+    }
+  }
+  const rows = [];
+  const walk = (list, depth) => {
+    for (const s of list) {
+      rows.push({ session: s, depth });
+      const kids = children.get(s.id);
+      if (kids?.length) walk(kids, Math.min(depth + 1, 3));
+    }
+  };
+  walk(roots, 0);
+  return rows;
+}
+
+function sessionRow(session, depth = 0) {
     const id = session.id;
     const running = state.runningSessions.has(id);
     const selected = id === currentId;
-    const row = h('div', { class: cn('session-row', selected && 'is-selected') });
+    const row = h('div', { class: cn('session-row', depth > 0 && 'is-child'), style: depth > 0 ? { '--depth': String(depth) } : null });
     const main = h('button', {
       type: 'button',
       class: 'session-row-main',
       'aria-current': selected ? 'page' : 'false',
       onclick: () => onSelect(id),
     },
+      depth > 0 ? h('span', { class: 'tree-guide', 'aria-hidden': 'true' }, '↳') : null,
       statusDot(session, running),
       h('span', { class: 'session-copy min-w-0' },
         h('span', { class: 'session-title' }, titleText(session)),
         h('span', { class: 'session-meta' },
+          projectDot(session),
           session.last_model ? h('span', { class: 'mono' }, session.last_model) : null,
           session.parent_id ? badge('分支', 'outline') : null,
           h('span', { class: 'text-subtle' }, relativeTime(session.updated_at)),
@@ -144,20 +191,28 @@ export function createSessionSidebar({ container, onSelect, onNewSession }) {
   }
 
   function render() {
+    projectChips.refresh();
     list.replaceChildren();
     const all = sortedSessions();
     const filtered = filter
       ? all.filter((s) => titleText(s).toLowerCase().includes(filter))
       : all;
-    const active = filtered.filter((s) => !s.archived);
-    const archived = filtered.filter((s) => s.archived);
+    const matchProject = (s) => projectFilter === 'all' ? true
+      : projectFilter === 'none' ? !s.project_id
+        : s.project_id === projectFilter;
+    const active = filtered.filter((s) => !s.archived && matchProject(s));
+    const archived = filtered.filter((s) => s.archived && matchProject(s));
     if (!active.length && !archived.length) {
-      list.append(h('p', { class: 'session-empty' }, filter ? '没有匹配的会话。' : '还没有会话，从新任务开始。'));
+      list.append(h('p', { class: 'session-empty' },
+        filter ? '没有匹配的会话。'
+          : projectFilter !== 'all' ? '该项目下还没有会话，可在会话菜单里「移动到项目」。'
+            : '还没有会话，从新任务开始。'));
       return;
     }
     for (const group of groupSessions(active)) {
-      list.append(sectionLabel(group.title, group.sessions.length));
-      for (const session of group.sessions) list.append(sessionRow(session));
+      const rows = treeRows(group.sessions);
+      list.append(sectionLabel(group.title, rows.length));
+      for (const { session, depth } of rows) list.append(sessionRow(session, depth));
     }
     if (archived.length) {
       const head = h('button', {
@@ -183,11 +238,22 @@ export function createSessionSidebar({ container, onSelect, onNewSession }) {
   on('sessions-changed', render);
   on('running-changed', render);
 
-  container.append(newButton, h('div', { class: 'session-search' }, searchInput), list);
+  container.append(
+    newButton,
+    projectChips.el,
+    h('div', { class: 'session-search' }, searchInput, manageBtn),
+    list,
+  );
   render();
 
   return {
-    refresh,
+    async refresh() {
+      await refreshProjects();
+      try {
+        state.sessions = await api('/api/sessions');
+        render();
+      } catch (_) { /* 连接错误由顶栏状态指示 */ }
+    },
     setCurrent(id) { currentId = id; render(); },
     get currentId() { return currentId; },
   };

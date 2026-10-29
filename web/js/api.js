@@ -1,7 +1,27 @@
 // API 客户端：JSON fetch + SSE 封装。所有路径自动带上工作区前缀。
 
-export const workspacePrefix = location.pathname.match(/^\/w\/[^/]+(?=\/|$)/)?.[0] || '';
+let workspacePrefix = location.pathname.match(/^\/w\/[^/]+(?=\/|$)/)?.[0] || '';
+export const getWorkspacePrefix = () => workspacePrefix;
+export function setWorkspacePrefix(prefix) {
+  workspacePrefix = prefix || '';
+}
 export const apiPath = (path) => workspacePrefix + path;
+// 绝对路径请求：跨工作区资源（如全局工作区列表）不走当前前缀。
+export const apiRootPath = (path) => path;
+export async function apiRoot(path, options = {}) {
+  const headers = { Accept: 'application/json', ...(options.headers || {}) };
+  const response = await fetch(path, { ...options, headers });
+  const raw = await response.text();
+  let body = null;
+  if (raw) { try { body = JSON.parse(raw); } catch (_) { body = raw; } }
+  if (!response.ok) {
+    const detail = body && typeof body === 'object' ? body.error || body.message : body;
+    const error = new Error(detail ? String(detail) : `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
 
 export async function api(path, options = {}) {
   const headers = { Accept: 'application/json', ...(options.headers || {}) };

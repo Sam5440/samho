@@ -1,28 +1,48 @@
-// 入口：装配侧栏 / 时间线 / 输入区 / 轨迹面板，接通 SSE 双流与任务生命周期。
+// 入口：装配工作区侧栏 / 时间线 / 输入区 / 右栏停靠，接通 SSE 双流与任务生命周期。
+// 工作区切换 = setWorkspacePrefix + pushState + 数据重载 + SSE 重挂 + 设备面板刷新。
 
-import { api, apiPost, apiPatch, openSse, array } from './api.js';
+import { api, apiPost, apiPatch, openSse, array, setWorkspacePrefix } from './api.js';
 import { state, on, draftKey, messagesOf, viewKeyOf, tierNames } from './store.js';
 import { h, cn, button, badge, spinner, openDialog, toast, bindTooltip } from './ui.js';
-import { createSessionSidebar } from './sessions.js';
+import { createWorkbenchSidebar } from './sidebar.js';
+import { createBrowserPane } from './panels/browser.js';
+import { createTerminalPane } from './panels/terminal.js';
+import { createFilesPanel } from './panels/files.js';
+import { createGitPanel } from './panels/git.js';
+import { createDock } from './dock.js';
+import { workspaceIdFromLocation } from './workspaces.js';
 import { createTimeline } from './timeline/render.js';
 import { createLiveToolState } from './timeline/projection.js';
 import { createComposer } from './composer.js';
 import { createTrajectoryPanel } from './trajectory/render.js';
 import { requestSummary } from './model-select.js';
-import { workspacePrefix, apiPath } from './api.js';
+import { mountGridBeam } from './cult/gridbeam.js';
+import { rollingNumber, setHalo } from './motion.js';
+import { apiPath } from './api.js';
 
 const byId = (id) => document.getElementById(id);
-const workspacePrefixRe = /^\/w\/[^/]+(?=\/|$)/;
 
 const liveTools = createLiveToolState();
 const timeline = createTimeline(byId('timeline'));
+const gridbeam = mountGridBeam(byId('gridbeam'));
+// 轮次计数滚柱：随任务状态标签复用（元素持久 → 数字滚动连续）。
+const taskTurnRoll = h('span', { class: 'roll-num mono' });
 const trajectory = createTrajectoryPanel(byId('panel-trajectory'), {
   getExportUrl: () => state.traceId ? apiPath(`/api/traces/${encodeURIComponent(state.traceId)}/export`) : null,
 });
 let sidebar;
 let composer;
+let dock;
+let files;
+let git;
+let terminal;
+let browser;
 let pollTimer = 0;
 let progressTimer = 0;
+let streamSources = [];
+let currentWorkspaceId = workspaceIdFromLocation();
+// 每个工作区记住上次打开的会话，切回时恢复。
+const wsSessionMemory = new Map([['default', null]]);
 
 /* ---------- 主题 ---------- */
 function resolveTheme(theme) {
@@ -54,7 +74,9 @@ function conversationTitle(session) {
 
 function syncTimeline(live = null) {
   const key = state.currentSessionId ? viewKeyOf(state.currentSessionId) : state.draftKeyValue;
-  timeline.sync(messagesOf(key || draftKey()), live);
+  const count = timeline.sync(messagesOf(key || draftKey()), live);
+  // 空态（草稿或无消息会话）显示唯一 canvas 背景，有内容即让位。
+  gridbeam.setActive(count === 0 && !live);
 }
 
 function updateHeader() {
@@ -69,6 +91,7 @@ function updateHeader() {
 async function loadSession(id, { force = false } = {}) {
   const request = ++state.requestCounter;
   state.currentSessionId = id;
+  wsSessionMemory.set(currentWorkspaceId, id);
   const key = viewKeyOf(id);
   if (key && !state.transcripts.has(key)) state.transcripts.set(key, []);
   sidebar.setCurrent(id);
@@ -128,21 +151,6 @@ function rememberEvent(event) {
   const identity = `${event.trace_id}/${event.sequence}/${event.span_id}/${event.kind}`;
   state.events.set(identity, event);
   if (state.events.size > 6000) state.events.delete(state.events.keys().next().value);
-}
-
-/* ---------- 轨迹面板 tab 行为 ---------- */
-function bindTabs() {
-  const tabs = Array.from(document.querySelectorAll('[data-slot="tab"]'));
-  const activate = (name) => {
-    tabs.forEach((tab) => {
-      const active = tab.dataset.panel === name;
-      tab.dataset.state = active ? 'active' : 'inactive';
-      tab.setAttribute('aria-selected', String(active));
-      byId(`panel-${tab.dataset.panel}`).hidden = !active;
-    });
-  };
-  tabs.forEach((tab) => tab.addEventListener('click', () => activate(tab.dataset.panel)));
-  activate('trajectory');
 }
 
 /* ---------- Inspector：对象 / MCP / 技能 ---------- */
@@ -239,15 +247,24 @@ function scheduleProgressRender() {
 
 function updateTaskStateLabel() {
   const label = byId('task-state');
+  const halo = byId('task-progress');
+  const progress = state.task?.progress;
   if (state.task) {
-    const progress = state.task.progress;
     const phase = progress?.status === 'streaming' ? '流式输出'
       : progress?.status === 'model_done' ? '处理工具调用' : '执行中';
-    label.textContent = `● ${phase}${progress?.turn ? ` · 第 ${progress.turn} 轮` : ''}`;
+    label.replaceChildren('● ', phase);
+    if (progress?.turn) {
+      label.append(' · 第 ', taskTurnRoll, ' 轮');
+      rollingNumber(taskTurnRoll, Number(progress.turn));
+    }
     label.style.color = 'var(--brand)';
+    // HaloProgress：第 N 轮 / max_turns（服务端 limits 未返回时不定态）。
+    setHalo(halo, Number(progress?.turn || 0), Number(state.limits?.max_turns) || 0);
+    halo.hidden = false;
   } else {
     label.textContent = '就绪';
     label.style.color = '';
+    halo.hidden = true;
   }
 }
 
@@ -388,27 +405,99 @@ async function cancelTask() {
 
 /* ---------- SSE ---------- */
 function attachStreams() {
-  if (!window.EventSource) { byId('stream-status').textContent = '事件流 / 浏览器不支持'; return; }
-  openSse('/api/events/stream', {
-    onOpen: () => byId('stream-status').textContent = '事件流 / 已连接',
-    onError: () => byId('stream-status').textContent = '事件流 / 重连中',
-    onTrace: (event) => {
-      rememberEvent(event);
-      if (['tool.start', 'tool.result'].includes(event.kind)) {
-        liveTools.apply(event);
-        scheduleProgressRender();
-      }
-      if (state.traceId && event.trace_id === state.traceId) {
-        trajectory.setEvents(collectTraceEvents(state.traceId));
-      }
-    },
-    onGap: () => { if (state.traceId) loadTrajectory(state.traceId); },
-  });
-  openSse('/api/live/stream', {
-    onProgress: (progress) => applyProgress(progress),
-    onGap: () => { const task = state.task; if (task?.id) pollTask(task); },
-    onOpen: () => { const task = state.task; if (task?.id) pollTask(task); },
-  });
+  for (const source of streamSources) source.close();
+  streamSources = [];
+  if (!window.EventSource) { dock.statusEl.textContent = '事件流 / 浏览器不支持'; return; }
+  const sources = [
+    openSse('/api/events/stream', {
+      onOpen: () => dock.statusEl.textContent = '事件流 / 已连接',
+      onError: () => dock.statusEl.textContent = '事件流 / 重连中',
+      onTrace: (event) => {
+        rememberEvent(event);
+        if (['tool.start', 'tool.result'].includes(event.kind)) {
+          liveTools.apply(event);
+          scheduleProgressRender();
+        }
+        if (state.traceId && event.trace_id === state.traceId) {
+          trajectory.setEvents(collectTraceEvents(state.traceId));
+        }
+      },
+      onGap: () => { if (state.traceId) loadTrajectory(state.traceId); },
+    }),
+    openSse('/api/live/stream', {
+      onProgress: (progress) => applyProgress(progress),
+      onGap: () => { const task = state.task; if (task?.id) pollTask(task); },
+      onOpen: () => { const task = state.task; if (task?.id) pollTask(task); },
+    }),
+  ];
+  streamSources = sources;
+}
+
+/* ---------- 工作区切换 ---------- */
+async function loadWorkspaceData() {
+  const names = ['状态', '模型', '会话', '项目', '对象', '技能', '界面'];
+  const results = await Promise.allSettled(
+    ['/api/state', '/api/models', '/api/sessions', '/api/projects', '/api/objects', '/api/skills', '/api/ui'].map((path) => api(path)));
+  const value = (i) => results[i].status === 'fulfilled' ? results[i].value : null;
+
+  const runtime = value(0);
+  state.simulation = Boolean(runtime?.simulation);
+  state.mcp = runtime?.mcp || null;
+  state.limits = runtime?.limits || null;
+  state.tiers = array(runtime?.tiers);
+  state.workspace = typeof runtime?.workspace === 'string'
+    ? runtime.workspace : runtime?.workspace?.path || '本地工作区';
+  const workspaceLabel = state.workspace.replace(/^\\\\\?\\/, '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || state.workspace;
+  byId('workspace-name').textContent = state.simulation ? `${workspaceLabel} · 模拟模式` : workspaceLabel;
+  byId('workspace-name').title = `${workspaceLabel} · ${state.workspace}`;
+  state.models = array(value(1), 'models').filter((m) => m && m.id);
+  state.sessions = array(value(2), 'sessions');
+  state.projects = array(value(3)).filter((p) => p && p.id);
+  state.objects = array(value(4), 'objects');
+  state.skills = array(value(5), 'skills');
+  if (value(6) && typeof value(6) === 'object') state.ui = { ...state.ui, ...value(6) };
+  applyTheme(state.ui.theme);
+
+  const failed = results.map((r, i) => r.status === 'rejected' ? names[i] : null).filter(Boolean);
+  if (failed.length) toast(`无法读取：${failed.join('、')}。请确认本地服务已启动。`, 'error');
+  setConnection(results.some((r) => r.status === 'fulfilled'));
+
+  sidebar.refresh();
+  updateHeader();
+  syncTimeline();
+  renderInspector();
+}
+
+async function switchWorkspace(id, { push = true } = {}) {
+  const target = id || 'default';
+  if (target === currentWorkspaceId) { sidebar.reloadWorkspaces(target); return; }
+  if (state.task) {
+    toast('当前工作区有任务运行中，等它结束或取消后再切换', 'error');
+    sidebar.reloadWorkspaces(currentWorkspaceId);
+    return;
+  }
+  const prefix = target === 'default' ? '' : `/w/${encodeURIComponent(target)}`;
+  setWorkspacePrefix(prefix);
+  if (push) history.pushState(null, '', prefix ? `${prefix}/` : '/');
+  wsSessionMemory.set(currentWorkspaceId, state.currentSessionId);
+  currentWorkspaceId = target;
+  state.currentSessionId = wsSessionMemory.get(target) ?? null;
+  state.draftKeyValue = draftKey();
+  state.traceId = '';
+  state.events.clear();
+  state.transcripts.clear();
+  state.runningSessions.clear();
+  liveTools.tools.clear();
+  trajectory.setEvents([]);
+  timeline.reset();
+  updateTaskStateLabel();
+  await loadWorkspaceData();
+  sidebar.setCurrent(state.currentSessionId);
+  sidebar.reloadWorkspaces(target);
+  attachStreams();
+  // 设备面板随前缀换数据：激活中的面板立即重列，终端切到该工作区的会话组。
+  await dock.refreshActive();
+  updateHeader();
 }
 
 /* ---------- 设置 ---------- */
@@ -485,6 +574,7 @@ function openModelQuickSelect() {
 function newSession() {
   state.draftKeyValue = draftKey();
   state.currentSessionId = null;
+  wsSessionMemory.set(currentWorkspaceId, null);
   state.traceId = '';
   state.requestCounter++;
   sidebar.setCurrent(null);
@@ -496,10 +586,31 @@ function newSession() {
 }
 
 async function bootstrap() {
-  sidebar = createSessionSidebar({
+  const devicePanels = {
+    files: files = createFilesPanel({ container: byId('panel-files') }),
+    git: git = createGitPanel({ container: byId('panel-git') }),
+    term: terminal = createTerminalPane({ container: byId('panel-term') }),
+    browser: browser = createBrowserPane({ container: byId('panel-browser') }),
+  };
+  dock = createDock({
+    devicePanels,
+    // 检查组的 DOM 可见性由 dock 统一切换（#panel-* 的 hidden）。
+    inspectPanels: {
+      trajectory: { show() {}, hide() {} },
+      objects: { show() {}, hide() {} },
+      mcp: { show() {}, hide() {} },
+      skills: { show() {}, hide() {} },
+    },
+    defaultDevice: 'files',
+  });
+  dock.statusEl.id = 'stream-status';
+  byId('dock-head').replaceChildren(dock.el);
+
+  sidebar = createWorkbenchSidebar({
     container: byId('sidebar'),
     onSelect: (id, { forceNew } = {}) => (id ? loadSession(id) : newSession()),
     onNewSession: newSession,
+    onSwitchWorkspace: (id) => switchWorkspace(id),
   });
   composer = createComposer({
     container: byId('composer-host'),
@@ -507,38 +618,15 @@ async function bootstrap() {
     onControl: controlTask,
     onCancel: cancelTask,
   });
-  bindTabs();
-  renderInspector();
 
-  const names = ['状态', '模型', '会话', '对象', '技能', '界面'];
-  const results = await Promise.allSettled(
-    ['/api/state', '/api/models', '/api/sessions', '/api/objects', '/api/skills', '/api/ui'].map((path) => api(path)));
-  const value = (i) => results[i].status === 'fulfilled' ? results[i].value : null;
+  window.addEventListener('popstate', () => {
+    const id = workspaceIdFromLocation();
+    if (id !== currentWorkspaceId) switchWorkspace(id, { push: false });
+  });
 
-  const runtime = value(0);
-  state.simulation = Boolean(runtime?.simulation);
-  state.mcp = runtime?.mcp || null;
-  state.tiers = array(runtime?.tiers);
-  state.workspace = typeof runtime?.workspace === 'string'
-    ? runtime.workspace : runtime?.workspace?.path || '本地工作区';
-  const workspaceLabel = state.workspace.replace(/^\\\\\?\\/, '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || state.workspace;
-  byId('workspace-name').textContent = state.simulation ? `${workspaceLabel} · 模拟模式` : workspaceLabel;
-  byId('workspace-name').title = state.workspace;
-  state.models = array(value(1), 'models').filter((m) => m && m.id);
-  state.sessions = array(value(2), 'sessions');
-  state.objects = array(value(3), 'objects');
-  state.skills = array(value(4), 'skills');
-  if (value(5) && typeof value(5) === 'object') state.ui = { ...state.ui, ...value(5) };
-  applyTheme(state.ui.theme);
-
-  const failed = results.map((r, i) => r.status === 'rejected' ? names[i] : null).filter(Boolean);
-  if (failed.length) toast(`无法读取：${failed.join('、')}。请确认本地服务已启动。`, 'error');
-  setConnection(results.some((r) => r.status === 'fulfilled'));
-
-  sidebar.refresh();
-  updateHeader();
-  syncTimeline();
-  renderInspector();
+  await loadWorkspaceData();
+  sidebar.setCurrent(state.currentSessionId);
+  dock.activate('trajectory');
   attachStreams();
   composer.focus();
 
@@ -552,6 +640,10 @@ async function bootstrap() {
     } catch (error) { toast(`分支失败：${error.message}`, 'error'); }
   });
   byId('refresh-sessions').addEventListener('click', () => refreshSessions());
+  byId('toggle-dock').addEventListener('click', () => {
+    const open = document.body.classList.toggle('dock-open');
+    byId('toggle-dock').setAttribute('aria-pressed', String(open));
+  });
   byId('theme-toggle').addEventListener('click', () => {
     const order = ['dark', 'light', 'system'];
     const next = order[(order.indexOf(state.ui.theme) + 1) % order.length];

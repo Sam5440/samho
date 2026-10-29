@@ -9,3 +9,4 @@ __pycache__/
 /reports/gui-validation/runtime.toml
 .zcode/
 /reports/frontend-refactor/runtime-data/
+/.rui-check/

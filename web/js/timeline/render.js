@@ -58,15 +58,22 @@ function rowElement(row, live = false) {
 }
 
 // live turn：流式文本 + 流式工具调用（未配对结果时显示 running）。
-function liveTurn(live) {
-  const wrap = h('section', { class: 'live-turn', 'aria-live': 'polite' });
+// 容器与流式文章跨帧复用（否则 CSS 动画每帧重启）——BorderBeamCard 需要持久元素。
+let liveWrap = null;
+let liveArticle = null;
+
+function liveTurn(live, reuse = liveWrap) {
+  const wrap = reuse || h('section', { class: 'live-turn', 'aria-live': 'polite' });
+  wrap.replaceChildren();
   if (live.turn) wrap.append(h('div', { class: 'turn-divider' }, h('span', { class: 'turn-divider-label' }, `第 ${live.turn} 轮${live.attempt > 1 ? ` · 重试 ${live.attempt}` : ''}`)));
   if (live.reasoning && live.reasoning.trim()) {
     wrap.append(reasoningBlock({ text: live.reasoning, running: true, startedAt: live.startedAt }));
   }
+  liveArticle = null;
   if (live.text && live.text.trim()) {
-    const article = h('article', { class: 'msg-assistant' });
-    article.append(h('div', { class: 'md-body', html: renderMarkdown(live.text) }));
+    const article = (reuse && wrap.querySelector('[data-beam="mono"]')) || h('article', { class: 'msg-assistant', 'data-beam': 'mono' });
+    liveArticle = article;
+    article.replaceChildren(h('div', { class: 'md-body', html: renderMarkdown(live.text) }));
     const meta = h('div', { class: 'msg-meta' });
     if (live.modelId) meta.append(badge(live.modelId, 'outline', true));
     meta.append(h('span', { class: 'msg-meta-inline' }, spinner('0.7rem')), badge('正在生成', 'info'));
@@ -154,14 +161,25 @@ export function createTimeline(container) {
       if (!keep.has(key)) { entry.el.remove(); rendered.delete(key); }
     }
     inner.replaceChildren(fragment);
-    if (live && live.running) inner.append(liveTurn(live));
+    if (live && live.running) {
+      liveWrap = liveTurn(live, liveWrap);
+      inner.append(liveWrap);
+    } else if (liveWrap) {
+      liveWrap.remove();
+      liveWrap = null;
+    }
     follow();
     return rows.length;
   }
 
   return {
     sync,
-    reset() { rendered.clear(); inner.replaceChildren(); },
+    reset() {
+      rendered.clear();
+      inner.replaceChildren();
+      liveWrap = null;
+      liveArticle = null;
+    },
     pin() { follow(true); },
   };
 }

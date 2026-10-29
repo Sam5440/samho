@@ -70,9 +70,10 @@ function argBadges(pairs) {
 }
 
 // 大输出钳制：max-h + 底部渐隐 + 悬浮展开（ZCode ExpandedContent 移植）。
-function clampContainer(rawText, { language } = {}) {
+function clampContainer(rawText, { language, cursor } = {}) {
   const pre = h('pre', { class: cn('tool-pre', language && 'mono') });
   pre.textContent = rawText;
+  if (cursor) pre.append(h('span', { class: 'term-cursor', 'aria-hidden': 'true' }));
   const wrap = h('div', { class: 'clamp-wrap' }, pre);
   let expanded = false;
   const ro = new ResizeObserver(() => {
@@ -92,8 +93,8 @@ function clampContainer(rawText, { language } = {}) {
   return container;
 }
 
-function ioSection(label, content, { error = false, markdown = false } = {}) {
-  const body = markdown ? h('div', { class: 'tool-md md-body', html: renderMarkdown(content) }) : clampContainer(content);
+function ioSection(label, content, { error = false, markdown = false, cursor = false } = {}) {
+  const body = markdown ? h('div', { class: 'tool-md md-body', html: renderMarkdown(content) }) : clampContainer(content, { cursor });
   return h('div', { class: 'tool-io', ...(error ? { 'data-tone': 'error' } : {}) },
     h('div', { class: 'tool-io-label' }, label),
     body,
@@ -104,6 +105,7 @@ export function toolCard(row) {
   const info = describe(row.name, row.args);
   const running = row.status === 'running' || row.status === 'streaming';
   const failed = row.status === 'error';
+  const terminal = running && row.name === 'shell';
   const card = h('article', {
     class: 'tool-card',
     'data-status': failed ? 'error' : running ? 'running' : 'completed',
@@ -129,10 +131,10 @@ export function toolCard(row) {
   );
   const body = h('div', { class: 'tool-body', hidden: true });
   if (row.input && row.input !== '{}' && row.input !== 'undefined') {
-    body.append(ioSection('输入', row.input));
+    body.append(ioSection('输入', row.input, { cursor: terminal }));
   }
   if (row.result) {
-    body.append(ioSection(failed ? '错误' : '输出', row.result, { error: failed }));
+    body.append(ioSection(failed ? '错误' : '输出', row.result, { error: failed, cursor: terminal }));
   }
   trigger.addEventListener('click', () => {
     const open = card.dataset.state === 'open';

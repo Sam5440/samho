@@ -24,7 +24,7 @@ regex = "1"
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest-native-tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-
+portable-pty = "0.8"
 
 [profile.release]
 lto = "thin"

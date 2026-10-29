@@ -2,6 +2,7 @@
 // CallCard（sticky 摘要 + 输入/输出 section + error 块）+ 按角色展开 + 搜索定位。
 
 import { h, cn, button, badge, spinner, openPopover, bindTooltip } from '../ui.js';
+import { rollingNumber } from '../motion.js';
 import { projectTrajectory, conversationDelta } from '../timeline/projection.js';
 import { createExpansion, TRAJECTORY_ROLES, roleLabel } from './expansion.js';
 
@@ -136,13 +137,20 @@ function callCard({ call, index, previous, expansion, query }) {
     h('span', { class: 'traj-model mono' }, call.modelId || '—'),
     call.finishReason ? badge(call.finishReason, finishVariant, true) : null,
     call.error ? badge('错误', 'destructive') : null,
-    h('span', { class: 'traj-meta mono' },
-      usage.input_tokens !== undefined ? `IN ${Number(usage.input_tokens).toLocaleString()}` : null,
-      usage.output_tokens !== undefined ? `· OUT ${Number(usage.output_tokens).toLocaleString()}` : null,
-      call.latencyMs ? `· ${(call.latencyMs / 1000).toFixed(1)}s` : null,
-      `· ${new Date(call.startedAt).toLocaleTimeString('zh-CN', { hour12: false })}`,
-    ),
   );
+  const meta = h('span', { class: 'traj-meta mono' });
+  // token 计数走 RollingNumber（CallCard 每次重挂载 → 首帧直接落位）。
+  const pushCount = (label, value) => {
+    if (meta.childElementCount) meta.append(' · ');
+    const span = h('span', { class: 'roll-num' });
+    meta.append(`${label} `, span);
+    rollingNumber(span, value);
+  };
+  if (usage.input_tokens !== undefined) pushCount('IN', Number(usage.input_tokens));
+  if (usage.output_tokens !== undefined) pushCount('OUT', Number(usage.output_tokens));
+  if (meta.childElementCount) meta.append(' · ');
+  meta.append(`${call.latencyMs ? `${(call.latencyMs / 1000).toFixed(1)}s · ` : ''}${new Date(call.startedAt).toLocaleTimeString('zh-CN', { hour12: false })}`);
+  summary.append(meta);
 
   const delta = conversationDelta(previous ? previous.request : null, call.request);
   const inputSection = h('div', { class: 'traj-section' }, h('div', { class: 'traj-section-title' }, '输入', badge(`${delta.length} 条新增`, 'outline')));
@@ -213,6 +221,10 @@ export function createTrajectoryPanel(container, { getExportUrl } = {}) {
   let loading = false;
 
   const summary = h('div', { class: 'traj-summary' });
+  // 汇总数值跨渲染持久（同一元素重挂 → 滚柱动画连续）。
+  const rollCalls = h('span', { class: 'roll-num mono' });
+  const rollIn = h('span', { class: 'roll-num mono' });
+  const rollOut = h('span', { class: 'roll-num mono' });
   const searchInput = h('input', {
     'data-component': 'input',
     placeholder: '搜索轨迹内容…',
@@ -245,10 +257,13 @@ export function createTrajectoryPanel(container, { getExportUrl } = {}) {
     const totalOut = calls.reduce((sum, c) => sum + Number(c.usage?.output_tokens || 0), 0);
     const models = [...new Set(calls.map((c) => c.modelId).filter(Boolean))];
     summary.replaceChildren(
-      h('span', {}, `${calls.length} 次调用`),
-      h('span', { class: 'mono' }, `IN ${totalIn.toLocaleString()} · OUT ${totalOut.toLocaleString()}`),
+      h('span', {}, rollCalls, ' 次调用'),
+      h('span', { class: 'mono' }, 'IN ', rollIn, ' · OUT ', rollOut),
       ...models.map((model) => badge(model, 'outline', true)),
     );
+    rollingNumber(rollCalls, calls.length);
+    rollingNumber(rollIn, totalIn);
+    rollingNumber(rollOut, totalOut);
     let previous = null;
     calls.forEach((call, index) => {
       const card = callCard({ call, index, previous, expansion, query });
