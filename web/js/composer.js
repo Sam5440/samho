@@ -1,5 +1,5 @@
-// 输入区：自适应 textarea + 模型选择 chip + 自动分级/复杂度 + 技能多选
-// + 运行中控制（调整方向 / 追加任务 / 停止）。
+// 输入区：自适应 textarea + 对话式发送（Enter 直发）+ 发送旁的分析/规划模型选择
+// + 自动分级/复杂度 + 技能多选 + 运行中控制（调整方向 / 追加任务 / 停止）。
 
 import { h, cn, button, badge, spinner, openPopover, toast, kbd } from './ui.js';
 import { modelSelectButton, requestSummary } from './model-select.js';
@@ -13,12 +13,12 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
   const textarea = h('textarea', {
     'data-component': 'textarea',
     class: 'composer-input',
-    placeholder: '描述你的任务…（Enter 换行，快捷键发送）',
+    placeholder: '发送消息，描述你的任务…（Enter 发送，Shift+Enter 换行）',
     maxlength: '100000',
     rows: '2',
     'aria-label': '任务内容',
   });
-  const sendLabel = h('span', {}, '运行任务');
+  const sendLabel = h('span', {}, '发送');
   const sendBtn = button(
     running ? spinner('0.8rem') : null, sendLabel,
     { type: 'submit', 'data-variant': 'default', 'data-size': 'lg', class: 'composer-send', disabled: true });
@@ -130,7 +130,7 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
     sendBtn.disabled = !hasText || (running && (!state.task?.id || sendingControl || cancelRequested));
     sendLabel.textContent = running
       ? (modeSelect.value === 'follow-up' ? '追加任务' : '调整方向')
-      : '运行任务';
+      : '发送';
     sendBtn.setAttribute('data-variant', running ? 'secondary' : 'default');
     modeSelect.hidden = !running;
     cancelBtn.hidden = !running;
@@ -145,7 +145,6 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
     h('div', { class: 'composer-shell', 'data-beam': 'ocean' },
       textarea,
       h('div', { class: 'composer-bar' },
-        modelChip,
         h('label', { class: 'composer-auto', title: '让路由器从任务描述推断所需智能层级' },
           automatic, h('span', {}, '自动分级'),
           complexity, complexityValue),
@@ -153,17 +152,21 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
         skillsBtn,
         modeSelect,
         cancelBtn,
+        modelChip,
         sendBtn,
       ),
       h('div', { class: 'composer-foot' },
         h('span', { class: 'text-ui-xs text-subtle' }, '当前选择：'),
-        h('span', { class: 'text-ui-xs mono' }, requestSummary(state)),
+        h('span', { class: 'text-ui-xs mono composer-foot-summary' }, requestSummary(state)),
         h('span', { class: 'text-ui-xs text-subtle' }, '· '),
         h('span', { class: 'text-ui-xs text-subtle' }, 'Shift+Enter 换行'),
       ),
     ),
   );
   container.append(form);
+  document.addEventListener('model-changed', () => {
+    form.querySelector('.composer-foot-summary').textContent = requestSummary(state);
+  });
   autoResize();
 
   return {

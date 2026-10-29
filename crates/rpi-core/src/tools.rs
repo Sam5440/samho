@@ -47,6 +47,8 @@ pub struct NetworkPolicyConfig {
     pub allow_loopback: bool,
     pub allow_private: bool,
     pub allow_http_loopback: bool,
+    /// 允许以明文 HTTP 访问的主机白名单（如仅提供 HTTP 的模型网关）。
+    pub allow_http_hosts: Vec<String>,
 }
 impl Default for NetworkPolicyConfig {
     fn default() -> Self {
@@ -56,6 +58,7 @@ impl Default for NetworkPolicyConfig {
             allow_loopback: true,
             allow_private: false,
             allow_http_loopback: true,
+            allow_http_hosts: vec![],
         }
     }
 }
@@ -125,6 +128,11 @@ impl NetworkPolicy for NetworkPolicyConfig {
             }
             if url.scheme() != "https"
                 && !(url.scheme() == "http" && loopback && self.allow_http_loopback)
+                && !(url.scheme() == "http"
+                    && self
+                        .allow_http_hosts
+                        .iter()
+                        .any(|entry| entry.eq_ignore_ascii_case(host)))
             {
                 bail!(
                     "network URL requires HTTPS (HTTP permitted only for enabled loopback fixtures)"
@@ -588,6 +596,24 @@ impl Object for ShellTool {
 mod tests {
     use super::*;
     use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn http_allowlist_permits_plain_http_host() {
+        let policy = NetworkPolicyConfig {
+            allow_http_hosts: vec!["192.0.2.10".into()],
+            ..NetworkPolicyConfig::default()
+        };
+        policy
+            .authorize_url(&"http://192.0.2.10:3000/v1".parse().unwrap())
+            .await
+            .expect("allowlisted host may use plain http");
+        let error = policy
+            .authorize_url(&"http://192.0.2.99:3000/v1".parse().unwrap())
+            .await
+            .expect_err("non-allowlisted http host stays denied");
+        assert!(error.to_string().contains("HTTPS"));
+    }
+
     #[tokio::test]
     async fn rejects_traversal() {
         let config = RuntimeConfig {

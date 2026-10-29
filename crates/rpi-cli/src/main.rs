@@ -1,5 +1,6 @@
 mod hub;
 mod panels;
+mod roles;
 mod server;
 mod term;
 mod tui;
@@ -110,14 +111,18 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
-    let runtime = AgentRuntime::new(config).await?;
-    let outcome = execute(&runtime, cli.command).await;
+    let (runtime, roles) = roles::build_runtime(config).await?;
+    let outcome = execute(&runtime, roles, cli.command).await;
     let shutdown = runtime.shutdown().await;
     outcome?;
     shutdown
 }
 
-async fn execute(runtime: &Arc<AgentRuntime>, command: Command) -> Result<()> {
+async fn execute(
+    runtime: &Arc<AgentRuntime>,
+    roles: Arc<roles::ModelRoles>,
+    command: Command,
+) -> Result<()> {
     match command {
         Command::Run(args) => {
             let tier = args
@@ -162,7 +167,7 @@ async fn execute(runtime: &Arc<AgentRuntime>, command: Command) -> Result<()> {
         }
         Command::Serve { bind } => {
             let address = bind.unwrap_or_else(|| runtime.config.http_bind.clone());
-            server::serve(runtime.clone(), &address).await?;
+            server::serve(runtime.clone(), roles, &address).await?;
         }
         Command::Fork {
             session,

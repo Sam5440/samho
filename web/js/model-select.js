@@ -83,13 +83,14 @@ export function openModelSelect(anchor, state, { onPick, restoreFocus }) {
         state.request.model = '';
       }
       toast(`模型选择：${requestSummary(state)}`);
+      document.dispatchEvent(new Event('model-changed'));
       onPick?.();
     },
     onClose: () => restoreFocus?.(),
   });
 }
 
-// Composer 左下角的模型选择按钮。
+// 发送按钮旁的分析/规划模型选择按钮。
 export function modelSelectButton(state, { onPick }) {
   const label = h('span', { class: 'model-chip-label' }, requestSummary(state));
   const btn = button(
@@ -106,6 +107,6 @@ export function modelSelectButton(state, { onPick }) {
         restoreFocus: () => btn.focus(),
       }),
     });
-  bindTooltip(btn, () => `模型选择：${label.textContent}（Ctrl+M）`);
+  bindTooltip(btn, () => `当前任务分析与规划模型：${label.textContent}（Ctrl+M）`);
   return btn;
 }

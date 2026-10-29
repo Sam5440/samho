@@ -118,9 +118,9 @@ impl HubState {
             let mut config = base_config.clone();
             config.workspace = record.path.clone();
             config.data_dir = record.data_dir.clone();
-            match AgentRuntime::new(config).await {
-                Ok(runtime) => {
-                    let app_state = AppState::new(runtime.clone());
+            match crate::roles::build_runtime(config).await {
+                Ok((runtime, roles)) => {
+                    let app_state = AppState::with_roles(runtime.clone(), roles);
                     let router = crate::server::router_with_state(app_state.clone());
                     self.dynamic.write().await.insert(
                         record.id.clone(),
@@ -257,10 +257,10 @@ pub(crate) async fn workspace_create(
     let mut config = app.runtime.config.clone();
     config.workspace = path.clone();
     config.data_dir = data_dir.clone();
-    let runtime = AgentRuntime::new(config)
+    let (runtime, roles) = crate::roles::build_runtime(config)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("工作区初始化失败：{e}")))?;
-    let app_state = AppState::new(runtime.clone());
+    let app_state = AppState::with_roles(runtime.clone(), roles);
     let router = crate::server::router_with_state(app_state.clone());
     let mut dynamic = hub.dynamic.write().await;
     if dynamic.len() >= MAX_DYNAMIC_WORKSPACES {

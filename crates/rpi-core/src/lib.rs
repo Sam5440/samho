@@ -25,6 +25,6 @@ pub mod tools;
 pub use agent::{AgentRuntime, RuntimeBuilder, TaskProgress, TaskRequest, TaskResult};
 pub use config::RuntimeConfig;
 pub use events::{EventLog, TraceEvent, TraceId};
-pub use model::{ModelRouter, ModelTier, TaskProfile};
+pub use model::{ModelDescriptor, ModelRouter, ModelTier, RouteDecision, TaskProfile, TaskRouter};
 pub use object::{Object, ObjectEnvelope, ObjectId, ObjectKind, ObjectRegistry};
 pub use projects::{Project, ProjectStore};

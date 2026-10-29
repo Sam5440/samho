@@ -30,6 +30,8 @@ pub(crate) struct AppState {
     pub(crate) hub: Option<Arc<crate::hub::HubState>>,
     /// 每工作区独立 PTY 终端池。
     pub(crate) terms: std::sync::Arc<crate::term::TermHub>,
+    /// 任务类型 → 模型覆盖表（与该运行时的 RoleRouter 共享）。
+    pub(crate) roles: Arc<crate::roles::ModelRoles>,
 }
 
 struct TaskEntry {
@@ -48,7 +50,18 @@ impl AppState {
             shutdown: CancellationToken::new(),
             hub: None,
             terms,
+            roles: crate::roles::ModelRoles::detached(),
         }
+    }
+
+    /// 生产装配：角色表与运行时内置的 RoleRouter 共享同一份 Arc。
+    pub(crate) fn with_roles(
+        runtime: Arc<AgentRuntime>,
+        roles: Arc<crate::roles::ModelRoles>,
+    ) -> Self {
+        let mut state = Self::new(runtime);
+        state.roles = roles;
+        state
     }
 
     async fn stop(&self) {
@@ -200,6 +213,21 @@ const STATIC_ASSETS: &[(&str, &str, &str)] = &[
         "/js/panels/git.js",
         "text/javascript; charset=utf-8",
         include_str!("../../../web/js/panels/git.js"),
+    ),
+    (
+        "/js/panels/models.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/models.js"),
+    ),
+    (
+        "/js/panels/agents.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/agents.js"),
+    ),
+    (
+        "/js/panels/tasks.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/panels/tasks.js"),
     ),
     (
         "/js/panels/browser.js",
@@ -375,6 +403,7 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
             get(get_project).patch(patch_project).delete(delete_project),
         )
         .route("/api/run", post(run_task))
+        .route("/api/tasks", get(tasks_list))
         .route("/api/tasks/{id}", get(task))
         .route("/api/tasks/{id}/cancel", post(cancel_task))
         .route("/api/tasks/{id}/steer", post(steer_task))
@@ -394,6 +423,12 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
             "/api/workspaces/{id}",
             patch(crate::hub::workspace_rename).delete(crate::hub::workspace_remove),
         )
+        .route(
+            "/api/model-roles",
+            get(model_roles_get).put(model_roles_put),
+        )
+        .route("/api/browse", get(crate::panels::browse_list))
+        .route("/api/browse/mkdir", post(crate::panels::browse_mkdir))
         .route("/w/{id}", any(crate::hub::workspace_dispatch))
         .route("/w/{id}/{*rest}", any(crate::hub::workspace_dispatch))
         .route("/api/term", post(crate::term::term_open))
@@ -522,10 +557,14 @@ async fn attach_workspaces(
         let mut workspace_config = runtime.config.clone();
         workspace_config.workspace = workspace.path.clone();
         workspace_config.data_dir = workspace.data_dir.clone();
-        let workspace_runtime = AgentRuntime::new(workspace_config).await?;
+        let (workspace_runtime, workspace_roles) =
+            crate::roles::build_runtime(workspace_config).await?;
         router = router.nest(
             &format!("/w/{}", workspace.id),
-            router_with_state(AppState::new(workspace_runtime.clone())),
+            router_with_state(AppState::with_roles(
+                workspace_runtime.clone(),
+                workspace_roles,
+            )),
         );
         extra_runtimes.push(workspace_runtime);
     }
@@ -533,7 +572,11 @@ async fn attach_workspaces(
     Ok((router, extra_runtimes))
 }
 
-pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
+pub async fn serve(
+    runtime: Arc<AgentRuntime>,
+    roles: Arc<crate::roles::ModelRoles>,
+    address: &str,
+) -> Result<()> {
     let address: SocketAddr = address.parse()?;
     anyhow::ensure!(
         address.ip().is_loopback(),
@@ -545,7 +588,7 @@ pub async fn serve(runtime: Arc<AgentRuntime>, address: &str) -> Result<()> {
         "TUI client: rpi tui --url http://{}",
         listener.local_addr()?
     );
-    let app = AppState::new(runtime.clone());
+    let app = AppState::with_roles(runtime.clone(), roles);
     // 动态工作区注册表：恢复上次保存的条目并挂到默认 AppState 上。
     let hub = crate::hub::HubState::new(runtime.config.data_dir.join("workspaces.json"));
     hub.load_saved(runtime.config.clone()).await;
@@ -803,6 +846,81 @@ async fn delete_project(State(app): State<AppState>, Path(id): Path<String>) -> 
     ))
 }
 
+/// GET /api/model-roles —— 任务类型（路由层级）→ 模型覆盖表。
+async fn model_roles_get(State(app): State<AppState>) -> Json<Value> {
+    let config = &app.runtime.config;
+    let tiers: Vec<Value> = config
+        .routing
+        .tiers
+        .iter()
+        .map(|tier| {
+            json!({
+                "id": tier.id,
+                "rank": tier.rank,
+                "min_complexity": tier.min_complexity,
+                "max_complexity": tier.max_complexity,
+                "requires_reasoning": tier.requires_reasoning,
+            })
+        })
+        .collect();
+    let models: Vec<Value> = config
+        .models
+        .iter()
+        .map(|model| json!({ "id": model.id, "tier": model.tier_name() }))
+        .collect();
+    Json(json!({
+        "roles": app.roles.snapshot(),
+        "default_model": app.roles.default_model(),
+        "tiers": tiers,
+        "models": models,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelRolesBody {
+    roles: BTreeMap<String, String>,
+}
+
+/// PUT /api/model-roles —— 覆盖任务类型→模型分配并持久化。
+/// 模型 id 为空串表示该类型跟随自动路由。
+async fn model_roles_put(
+    State(app): State<AppState>,
+    Json(body): Json<ModelRolesBody>,
+) -> ApiResult<serde_json::Value> {
+    let valid_models: std::collections::BTreeSet<String> = app
+        .runtime
+        .config
+        .models
+        .iter()
+        .map(|model| model.id.clone())
+        .collect();
+    for (tier, model) in &body.roles {
+        if !app.roles.tier_ids().iter().any(|known| known == tier) {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                format!("未知任务类型：{tier}"),
+            ));
+        }
+        if !model.is_empty() && !valid_models.contains(model) {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                format!("未知模型：{model}"),
+            ));
+        }
+    }
+    app.roles
+        .apply(body.roles.clone())
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Err(error) = app.roles.persist().await {
+        return Err(ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("保存模型分配失败：{error}"),
+        ));
+    }
+    Ok(Json(json!({ "roles": app.roles.snapshot() })))
+}
+
 async fn run_task(
     State(app): State<AppState>,
     Json(request): Json<TaskRequest>,
@@ -929,6 +1047,28 @@ async fn task(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<
         })?;
     snapshot.progress = app.runtime.progress(&id).await;
     Ok(Json(snapshot))
+}
+
+/// GET /api/tasks —— 任务看板数据：全部快照 + 运行中任务附实时进度。
+async fn tasks_list(State(app): State<AppState>) -> Json<Value> {
+    let tasks = app.tasks.read().await;
+    let mut items = Vec::with_capacity(tasks.len());
+    for (id, entry) in tasks.iter() {
+        let mut snapshot = entry.snapshot.clone();
+        if snapshot.status == "running" {
+            snapshot.progress = app.runtime.progress(id).await;
+        }
+        items.push(json!({
+            "task_id": snapshot.task_id,
+            "status": snapshot.status,
+            "error": snapshot.error,
+            "result": snapshot.result,
+            "progress": snapshot.progress,
+        }));
+    }
+    // 运行中在前，其余按创建序倒排（BTreeMap key 即 UUID，无时间序；快照有限，够看板用）。
+    items.reverse();
+    Json(json!({ "tasks": items }))
 }
 async fn cancel_task(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     let tasks = app.tasks.read().await;
@@ -1346,6 +1486,166 @@ mod tests {
             ..RuntimeConfig::default()
         };
         (router(AgentRuntime::new(config).await.unwrap()), dir)
+    }
+
+    #[tokio::test]
+    async fn model_roles_roundtrip_and_validation() {
+        // 走生产装配（build_runtime + with_roles），角色表按层级种子化。
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let (runtime, roles) = crate::roles::build_runtime(config).await.unwrap();
+        let router = router_with_state(AppState::with_roles(runtime, roles));
+        let get = |router: axum::Router| {
+            router.clone().oneshot(
+                Request::builder()
+                    .uri("/api/model-roles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+        };
+        let response = get(router.clone()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert!(
+            body["tiers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["id"] == "nano"),
+            "tiers should expose routing tiers: {body}"
+        );
+        assert_eq!(body["roles"]["nano"], "", "无默认模型时种子为空串");
+        // 未知模型被拒绝。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/model-roles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"roles":{"nano":"no-such-model"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // 未知任务类型被拒绝。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/model-roles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"roles":{"nope":""}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // 合法分配写入后可读回；空串 = 跟随自动路由。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/model-roles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"roles":{"nano":"demo-balanced","fast":""}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(body["roles"]["nano"], "demo-balanced");
+        assert_eq!(body["roles"]["fast"], "");
+    }
+
+    #[tokio::test]
+    async fn browse_lists_directories_and_mkdir() {
+        let (router, dir) = fixture().await;
+        std::fs::create_dir_all(dir.path().join("pick-me/nested")).unwrap();
+        std::fs::write(dir.path().join("file.txt"), "x").unwrap();
+        let encoded: String = dir
+            .path()
+            .to_string_lossy()
+            .bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (byte as char).to_string()
+                }
+                _ => format!("%{byte:02X}"),
+            })
+            .collect();
+        let url = format!("/api/browse?path={encoded}");
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 256 * 1024).await.unwrap())
+                .unwrap();
+        let names: Vec<&str> = body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"pick-me") && !names.contains(&"file.txt"),
+            "只列目录，不列文件：{names:?}"
+        );
+        // 根视图（Windows 列盘符）全部为 dir。
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/browse")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 256 * 1024).await.unwrap())
+                .unwrap();
+        assert!(
+            body["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["kind"] == "dir")
+        );
+        // mkdir 递归创建。
+        let target = dir.path().join("made/here");
+        let payload = json!({ "path": target.to_string_lossy() });
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/browse/mkdir")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(target.is_dir());
     }
 
     async fn hub_fixture() -> (Router, tempfile::TempDir, Arc<crate::hub::HubState>) {

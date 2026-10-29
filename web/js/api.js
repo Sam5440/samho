@@ -58,6 +58,19 @@ export function apiDelete(path) {
   return api(path, { method: 'DELETE' });
 }
 
+// 设备级目录浏览（新建工作区选择器用；不受当前工作区前缀影响）。
+export function browseList(path = '') {
+  return apiRoot(`/api/browse?path=${encodeURIComponent(path)}`);
+}
+
+export function browseMkdir(path) {
+  return apiRoot('/api/browse/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+}
+
 export function openSse(path, { onTrace, onProgress, onGap, onOpen, onError }) {
   const source = new EventSource(apiPath(path));
   if (onOpen) source.onopen = () => onOpen(source);

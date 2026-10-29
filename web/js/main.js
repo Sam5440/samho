@@ -9,6 +9,9 @@ import { createBrowserPane } from './panels/browser.js';
 import { createTerminalPane } from './panels/terminal.js';
 import { createFilesPanel } from './panels/files.js';
 import { createGitPanel } from './panels/git.js';
+import { createModelsPanel } from './panels/models.js';
+import { createAgentsPanel } from './panels/agents.js';
+import { createTasksPanel } from './panels/tasks.js';
 import { createDock } from './dock.js';
 import { workspaceIdFromLocation } from './workspaces.js';
 import { createTimeline } from './timeline/render.js';
@@ -37,6 +40,8 @@ let files;
 let git;
 let terminal;
 let browser;
+let modelsPanel;
+let agentsPanel;
 let pollTimer = 0;
 let progressTimer = 0;
 let streamSources = [];
@@ -597,9 +602,12 @@ async function bootstrap() {
     // 检查组的 DOM 可见性由 dock 统一切换（#panel-* 的 hidden）。
     inspectPanels: {
       trajectory: { show() {}, hide() {} },
+      agents: agentsPanel = createAgentsPanel({ container: byId('panel-agents') }),
+      tasks: createTasksPanel({ container: byId('panel-tasks') }),
       objects: { show() {}, hide() {} },
       mcp: { show() {}, hide() {} },
       skills: { show() {}, hide() {} },
+      models: modelsPanel = createModelsPanel({ container: byId('panel-models') }),
     },
     defaultDevice: 'files',
   });
@@ -659,6 +667,11 @@ async function bootstrap() {
     else if (matchesShortcut(event, 'Ctrl+M')) { event.preventDefault(); openModelQuickSelect(); }
   });
   document.addEventListener('running-changed', () => { composer.update(); });
+  // 子代理面板「打开会话」：切到对应会话（任务运行中也能跟踪）。
+  document.addEventListener('agents-open-session', (event) => {
+    const sessionId = event.detail?.sessionId;
+    if (sessionId) loadSession(sessionId);
+  });
   // Enter 直发在 composer 内部处理；这里补 Ctrl/自定义发送键。
   document.addEventListener('keydown', (event) => {
     if (event.target !== document.querySelector('.composer-input')) return;

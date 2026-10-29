@@ -257,6 +257,95 @@ pub(crate) async fn fs_mkdir(
     Ok(Json(json!({ "created": true, "path": body.path })))
 }
 
+// ---------- 设备级目录浏览（新建工作区选择器专用，不受工作区约束） ----------
+
+async fn browse_roots() -> Vec<serde_json::Value> {
+    #[cfg(windows)]
+    {
+        let mut roots = Vec::new();
+        for byte in b'A'..=b'Z' {
+            let root = format!("{}:\\", byte as char);
+            if tokio::fs::metadata(&root)
+                .await
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false)
+            {
+                roots.push(json!({
+                    "name": format!("{}:", byte as char),
+                    "path": root,
+                    "kind": "dir",
+                }));
+            }
+        }
+        roots
+    }
+    #[cfg(not(windows))]
+    {
+        vec![json!({ "name": "/", "path": "/", "kind": "dir" })]
+    }
+}
+
+/// GET /api/browse?path= —— 设备级目录列举（只返回子目录）。
+/// `path` 为空时返回根视图：Windows 列存在的盘符，Unix 列 /。
+pub(crate) async fn browse_list(Query(q): Query<PathQuery>) -> ApiResult<serde_json::Value> {
+    let raw = q.path.trim().to_string();
+    if raw.is_empty() {
+        return Ok(Json(json!({
+            "path": "",
+            "parent": serde_json::Value::Null,
+            "entries": browse_roots().await,
+        })));
+    }
+    let dir = std::path::PathBuf::from(&raw);
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut rd = tokio::fs::read_dir(&dir)
+        .await
+        .map_err(|e| bad(format!("无法读取目录 {raw}：{e}")))?;
+    while let Some(entry) = rd
+        .next_entry()
+        .await
+        .map_err(|e| bad(format!("无法读取目录 {raw}：{e}")))?
+    {
+        if !entry
+            .file_type()
+            .await
+            .map(|kind| kind.is_dir())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let child = dir.join(&name);
+        entries.push(json!({
+            "name": name,
+            "path": child.to_string_lossy(),
+            "kind": "dir",
+        }));
+    }
+    entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let parent = dir
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned());
+    Ok(Json(
+        json!({ "path": raw, "parent": parent, "entries": entries }),
+    ))
+}
+
+/// POST /api/browse/mkdir —— 设备级递归建目录。
+pub(crate) async fn browse_mkdir(Json(body): Json<MkdirBody>) -> ApiResult<serde_json::Value> {
+    let raw = body.path.trim();
+    if raw.is_empty() {
+        return Err(bad("路径不能为空"));
+    }
+    let path = std::path::PathBuf::from(raw);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| bad(format!("创建目录失败：{e}")))?;
+    Ok(Json(
+        json!({ "created": true, "path": path.to_string_lossy() }),
+    ))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RenameBody {

@@ -12,7 +12,7 @@ export function createDock({ devicePanels, inspectPanels, defaultDevice = 'files
   ]);
   const labels = {
     files: '文件', git: 'Git', term: '终端', browser: '浏览器',
-    trajectory: '轨迹', objects: '对象', mcp: 'MCP', skills: '技能',
+    trajectory: '轨迹', agents: '子代理', tasks: '任务', objects: '对象', mcp: 'MCP', skills: '技能', models: '模型',
   };
   let active = null;
   let lastByGroup = { device: defaultDevice, inspect: 'trajectory' };
