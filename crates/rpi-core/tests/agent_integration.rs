@@ -207,6 +207,8 @@ async fn demo_read_write_policy_skills_and_resume_use_real_objects() -> Result<(
     )?;
     let mut settings = config(dir.path());
     settings.skill_roots = vec![dir.path().join("skills")];
+    // 该断言验证 write 策略关闭时的拒绝路径；默认工具集现已含 write_file，需显式关闭。
+    settings.tools.write = false;
     let runtime = AgentRuntime::new(settings.clone()).await?;
     let result = runtime
         .run(request("/demo read input.txt"), CancellationToken::new())

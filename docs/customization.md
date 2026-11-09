@@ -27,14 +27,14 @@ cargo run -p rpi -- --config rpi.toml serve
 
 ## 三、工具、MCP、技能与日志
 
-`tools`（工具策略）控制工作区读写、Shell 和 MCP 访问及 Shell 超时。`skill_roots` 控制技能发现来源。`mcp_servers` 接受 stdio 命令或 Streamable HTTP 地址，可通过指定环境变量读取 HTTP Bearer 令牌。`log_content` 控制轨迹载荷详细程度，`durable_logs` 控制强制落盘。
+`tools`（工具策略）控制各内置工具的启停及 Shell 超时。默认启用完整编码工具集（参照 OpenCode/ZCode/Pi/omp 的默认工具带）：`read`（读文件，支持行窗口）、`write`（写文件）、`edit`（精确字符串替换）、`list_files`（浏览目录）、`glob`（文件模式匹配）、`grep`（正则搜索内容）、`webfetch`（按网络策略抓取网页）、`todo`（会话任务清单）、`shell`（执行命令）与 MCP 访问全部默认开启；安全敏感场景可在配置中显式关闭任意一项。`list_files` 与 `grep` 的递归下降始终跳过 `.git`、`node_modules`、`target` 和符号链接。`skill_roots` 控制技能发现来源。`mcp_servers` 接受 stdio 命令或 Streamable HTTP 地址，可通过指定环境变量读取 HTTP Bearer 令牌。`log_content` 控制轨迹载荷详细程度，`durable_logs` 控制强制落盘。
 
 | 领域 | 当前可自定义 | 当前边界 |
 | --- | --- | --- |
 | 模型 | 多端点/物理 ID、能力、上下文和输出限制、推理强度、价格、延迟提示、领域、额外请求正文 | Provider trait 和自定义 HTTP 头扩展仍需公开版本化插件接口 |
 | 路由 | 有序分类、评分权重、输出预留、逐任务模型/层级/能力/预算/延迟覆盖、失败 retry/reroute | 六个内置层级可扩展配置；质量评测仍由部署者提供 |
 | 运行时 | 系统提示词、最大轮次、并发任务数、请求超时、工具输出上限、预算与网络策略 | 工具批次默认串行；逐服务并发队列需由扩展实现 |
-| 工具 | 读/写/Shell/MCP 策略，通过 `register_tool` 注册 Rust `Object` 工具，支持 schema、hook、取消和动态注册 | 直接对象调用仍是受信任嵌入 API；第三方 ABI/版本隔离需后续扩展 |
+| 工具 | 读/写/编辑/目录浏览/模式匹配/内容搜索/网页抓取/任务清单/Shell/MCP 策略，通过 `register_tool` 注册 Rust `Object` 工具，支持 schema、hook、取消和动态注册 | `websearch`、子代理（task/agent）、apply-patch、LSP/ast_grep 等参照项未实现；直接对象调用仍是受信任嵌入 API |
 | MCP | 服务、stdio 命令/参数/工作目录/环境、环境清理、HTTP 令牌环境变量、请求与启动超时、optional fixture、OAuth PKCE | metadata discovery、动态注册、自动重连和官方 conformance 仍未完成 |
 | 技能 | 有序来源目录、YAML 元数据、惰性正文、ignore、资源相对路径、allowed-tools 权限 | 来源热重载和跨进程技能包签名仍待扩展 |
 | 日志 | JSONL/SQLite、脱敏、内容开关、span 关系、分页、rotation/retention、timeline/export、SSE | 外部日志后端适配器和大规模分布式索引需后续实现 |

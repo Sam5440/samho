@@ -167,7 +167,7 @@ web/
     model-select.js     Command 风格模型选择器（tier 分组 + 徽章 + Ctrl+M）
     timeline/
       projection.js     messages → rows（turn 划分/part 合并/工具配对/commentary）
-      tools.js          工具渲染注册表（read_file/write_file/load_skill/MCP/generic）
+      tools.js          工具渲染注册表（read_file/write_file/edit_file/list_files/glob/grep/webfetch/todo_*/load_skill/MCP/generic）
       reasoning.js      思考块（标题提取/耗时/shimmer）
       render.js         行渲染 + key 复用 + live turn + auto-scroll pin/unpin
     trajectory/

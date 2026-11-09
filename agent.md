@@ -74,7 +74,7 @@ cargo run -p rpi -- --config rpi.toml serve
 
 ```powershell
 cargo fmt --all -- --check
-cargo test --workspace --locked                            # 93 项（2026-10-27 基线）
+cargo test --workspace --locked                            # 135 项（2026-10-31 基线）
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
 node --test scripts/test-chinese-pages.mjs                 # 13 项中文网页契约
 node --check web/app.js
@@ -116,7 +116,7 @@ CLI run/inspect/replay/fork ─┘                              │
 | `skill_roots` | `[".agents/skills", ".pi/skills"]` | 相对路径基于 workspace |
 | `models` | 6 个 demo 模型 | 至少 1 个 |
 | `routing` | 见下 | 分类规则与评分 |
-| `tools` | read=T, write=F, shell=F, mcp=T, shell_timeout_ms=30000 | `ToolPolicy` |
+| `tools` | read=T, write=T, edit=T, list_files=T, glob=T, grep=T, webfetch=T, todo=T, shell=T, mcp=T, shell_timeout_ms=30000 | `ToolPolicy`（完整编码工具集默认全开，参照 OpenCode/ZCode/Pi/omp） |
 | `mcp_servers` | `[]` | `[[mcp_servers]]` |
 | `streaming` / `stream_buffer` | `true` / `32`（≤65536） | 流式开关与通道容量 |
 | `context` | enabled=T, target_fraction=0.7, retain_recent_groups=4, summary_max_bytes=4096 | 投影/压缩 |
@@ -163,13 +163,19 @@ CLI run/inspect/replay/fork ─┘                              │
 
 | 工具 | 开关 | 输入 | 行为 |
 | --- | --- | --- | --- |
-| `read_file` | tools.read | `{path}` | 仅 workspace 相对路径，禁止绝对/父目录/symlink，超限报错 |
-| `write_file` | tools.write（默认关） | `{path, content}` | 建父目录后写入 |
+| `read_file` | tools.read | `{path, offset?, limit?≤2000}` | 仅 workspace 相对路径，禁止绝对/父目录/symlink；可选 1 起始行窗口（默认整文件），返回 `total_lines/start_line/end_line/truncated_lines` |
+| `write_file` | tools.write | `{path, content}` | 建父目录后写入 |
+| `edit_file` | tools.edit | `{path, old_string, new_string, replace_all?}` | 精确字符串替换；不匹配/多处匹配（未开 replace_all）报错；不创建文件；上限 16 MiB；展示用调用方相对路径 |
+| `list_files` | tools.list_files | `{path?, depth?≤16, max_entries?≤2000}` | workspace 内目录枚举（默认根、深 4、500 条，目录优先按名排序）；跳过 `.git`/`node_modules`/`target`/symlink；`truncated` 标记截断 |
+| `glob` | tools.glob | `{pattern, path?, max_entries?≤2000}` | 文件模式匹配：段内 `*`/`?`，`**` 跨任意层目录；不含 `/` 的模式按文件名任意深度匹配；大小写敏感；只返回文件；同款跳过清单 |
+| `grep` | tools.grep | `{pattern, path?, glob?(*?通配文件名), ignore_case?, max_results?≤1000}` | workspace 内正则内容搜索（默认根，返回 `{file,line,text}`，行文本截 240 字符）；跳过二进制（NUL 探测）、>1MiB 文件、`.git`/`node_modules`/`target`/symlink；计数器如实回报 |
+| `webfetch` | tools.webfetch | `{url, max_bytes?≤1MiB(默认128KiB)}` | 经 `NetworkPolicy` 逐跳校验（含重定向，≤5 跳，禁自动重定向）；30s 总超时；HTML 剥离 script/style/标签解码常见实体为纯文本（非完整 Markdown 转换）；二进制 MIME 拒绝；流式读取硬顶截断 |
+| `todo_write` / `todo_read` | tools.todo | `{items:[{task,status:pending\|in_progress\|completed,note?}]}` / `{}` | 会话级任务清单（`data_dir/todos/{session}.json`，temp+rename 原子发布，≤200 项）；write 全量替换并回读，read 返回 `{items,exists}` |
 | `load_skill` | 恒开 | `{name}` | 模型侧技能加载；`disable-model-invocation` 技能拒绝 |
-| `shell` | tools.shell（默认关） | `{command}` | Windows powershell -NoProfile（CREATE_NO_WINDOW）/其他 sh -c；超时/取消杀死子进程 |
+| `shell` | tools.shell | `{command}` | Windows powershell -NoProfile（CREATE_NO_WINDOW）/其他 sh -c；超时/取消杀死子进程 |
 | `mcp__{server}__{tool}` | tools.mcp | 按 schema | 路由到 MCP |
 
-调用顺序：取消检查 → 活动技能 `allowed-tools` 门控 → 策略授权 → schema 校验（禁外部 `$ref`）→ 经 ObjectRegistry 租约调用 → 输出 schema 复验。
+调用顺序：取消检查 → 活动技能 `allowed-tools` 门控 → 策略授权 → schema 校验（禁外部 `$ref`）→ 经 ObjectRegistry 租约调用 → 输出 schema 复验。`list_files`/`glob`/`grep` 的目录遍历在 `spawn_blocking` 中执行并响应取消；`webfetch` 复用运行时 `NetworkPolicy`（`RuntimeBuilder.network_policy` 定制同样生效）。工具 schema 全量计入上下文投影与预算 worst-case 预留（ConservativeTokenCounter 按序列化 JSON 字节计），默认工具集扩大会线性抬高每次派发的预留——预算/投影校准类测试需固定自己的工具集（`pin_minimal_tools`）。
 
 ### 5.6 session.rs — 会话存储
 
@@ -260,7 +266,7 @@ CLI run/inspect/replay/fork ─┘                              │
 
 ## 九、测试与端口策略
 
-- 93 项 Rust 测试（CLI 16、core 单元 4、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 11、runtime semantics 9、skill policy 5、storage lifecycle 9）+ 13 项 Node 网页契约。
+- 135 项 Rust 测试（CLI 38、core 单元 19、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9）+ 13 项 Node 网页契约。
 - **测试端口策略**：所有测试/fixture/OAuth 回调/浏览器/smoke 只用 **300–400**（Rust `test_support::bind_loopback()` 实际 301–399）；生产端口不限。
 - 集成测试全部使用本地 fixture（axum/Python stdio MCP/faux provider），零真实模型调用、零付费。
 - 已知未验收：真实供应商质量、官方 MCP conformance、macOS/Linux 实机、24h soak、同机 Pi/Rust 性能对照。

@@ -211,6 +211,12 @@ pub struct RoutingRule {
 pub struct ToolPolicy {
     pub read: bool,
     pub write: bool,
+    pub edit: bool,
+    pub list_files: bool,
+    pub glob: bool,
+    pub grep: bool,
+    pub webfetch: bool,
+    pub todo: bool,
     pub shell: bool,
     pub mcp: bool,
     pub shell_timeout_ms: u64,
@@ -219,8 +225,14 @@ impl Default for ToolPolicy {
     fn default() -> Self {
         Self {
             read: true,
-            write: false,
-            shell: false,
+            write: true,
+            edit: true,
+            list_files: true,
+            glob: true,
+            grep: true,
+            webfetch: true,
+            todo: true,
+            shell: true,
             mcp: true,
             shell_timeout_ms: 30_000,
         }

@@ -266,6 +266,7 @@ impl AgentRuntime {
         )
         .await?;
         let tools = ToolRegistry::new(&config, skills.clone(), mcp.clone())?;
+        tools.set_network_policy(network.clone());
         if let Some(policy) = builder.tool_policy {
             tools.set_policy(policy);
         }

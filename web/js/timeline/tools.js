@@ -7,8 +7,14 @@ import { renderMarkdown, reasoningHeading } from '../markdown.js';
 const ICONS = {
   read: '<path d="M14 3v5h5M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>',
   write: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  edit: '<path d="M11 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-6"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>',
   skill: '<path d="M13 2 4.1 12.6a.6.6 0 0 0 .5 1h5.4l-1 8.4 8.9-10.6a.6.6 0 0 0-.5-1H12z"/>',
   terminal: '<path d="m5 8 4 4-4 4"/><path d="M12 17h7"/>',
+  folder: '<path d="M4 5h5l2 2h9v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  pattern: '<path d="M12 4v16M5 8l14 8M19 8 5 16"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/>',
+  checklist: '<path d="m3 5 2 2 3-3"/><path d="M11 6h10"/><path d="m3 13 2 2 3-3"/><path d="M11 14h10"/>',
   tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2z"/>',
 };
 
@@ -43,6 +49,64 @@ const registry = {
     icon: 'skill',
     subtitle: (args) => String(args.name || ''),
     args: () => [],
+  },
+  list_files: {
+    title: () => '浏览目录',
+    icon: 'folder',
+    subtitle: (args) => String(args.path || '.'),
+    args: (args) => [
+      args.depth !== undefined && ['depth', args.depth],
+      args.max_entries !== undefined && ['max_entries', args.max_entries],
+    ].filter(Boolean),
+  },
+  glob: {
+    title: () => '匹配文件',
+    icon: 'pattern',
+    subtitle: (args) => String(args.pattern || ''),
+    args: (args) => [
+      args.path !== undefined && ['path', args.path],
+      args.max_entries !== undefined && ['max_entries', args.max_entries],
+    ].filter((pair) => pair && pair[1] !== undefined),
+  },
+  edit_file: {
+    title: () => '编辑文件',
+    icon: 'edit',
+    subtitle: (args) => String(args.path || ''),
+    args: (args) => [
+      args.old_string !== undefined && ['old', String(args.old_string).length],
+      args.new_string !== undefined && ['new', String(args.new_string).length],
+      args.replace_all !== undefined && ['all', args.replace_all],
+    ].filter((pair) => pair && pair[1] !== undefined),
+  },
+  webfetch: {
+    title: () => '抓取网页',
+    icon: 'globe',
+    subtitle: (args) => String(args.url || ''),
+    args: (args) => [
+      args.max_bytes !== undefined && ['max_bytes', args.max_bytes],
+    ].filter((pair) => pair && pair[1] !== undefined),
+  },
+  todo_write: {
+    title: () => '更新任务清单',
+    icon: 'checklist',
+    subtitle: (args) => Array.isArray(args.items) ? `${args.items.length} 项` : '',
+    args: () => [],
+  },
+  todo_read: {
+    title: () => '读取任务清单',
+    icon: 'checklist',
+    subtitle: () => '',
+    args: () => [],
+  },
+  grep: {
+    title: () => '搜索内容',
+    icon: 'search',
+    subtitle: (args) => String(args.pattern || ''),
+    args: (args) => [
+      args.path !== undefined && ['path', args.path],
+      args.glob !== undefined && ['glob', args.glob],
+      args.ignore_case !== undefined && ['ignore_case', args.ignore_case],
+    ].filter((pair) => pair && pair[1] !== undefined),
   },
 };
 

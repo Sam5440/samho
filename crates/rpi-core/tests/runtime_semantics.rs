@@ -53,6 +53,18 @@ fn config(dir: &std::path::Path) -> RuntimeConfig {
     config.tools.read = false;
     config
 }
+// 预算预留与上下文投影的输入估算都包含广告的工具 schema；
+// 校准类测试固定精简工具集，避免默认工具集变化移动边界。
+fn pin_minimal_tools(config: &mut RuntimeConfig) {
+    config.tools.write = false;
+    config.tools.edit = false;
+    config.tools.shell = false;
+    config.tools.list_files = false;
+    config.tools.glob = false;
+    config.tools.grep = false;
+    config.tools.webfetch = false;
+    config.tools.todo = false;
+}
 struct Script {
     mode: &'static str,
     calls: AtomicUsize,
@@ -230,6 +242,7 @@ async fn task_and_total_token_ceilings_apply_before_dispatch_and_survive_restart
     let dir = tempfile::tempdir()?;
     let script = Script::new("always_fail");
     let mut c = config(dir.path());
+    pin_minimal_tools(&mut c);
     c.budget.max_task_tokens = 1500;
     c.budget.max_total_tokens = Some(1500);
     c.models.iter_mut().for_each(|m| m.max_output_tokens = 1024);
@@ -358,6 +371,7 @@ async fn long_sessions_project_context_without_losing_journal_or_fork_parent() -
     let dir = tempfile::tempdir()?;
     let script = Script::new("echo");
     let mut c = config(dir.path());
+    pin_minimal_tools(&mut c);
     c.models.truncate(1);
     c.models[0].context_window = 5000;
     c.models[0].max_output_tokens = 256;
@@ -576,6 +590,7 @@ async fn reasoning_overage_is_absorbed_and_massive_overage_warns_but_completes()
     let dir = tempfile::tempdir()?;
     let script = Script::new("reasoning_overage");
     let mut c = config(dir.path());
+    pin_minimal_tools(&mut c);
     c.models
         .iter_mut()
         .for_each(|m| m.supports_reasoning = true);

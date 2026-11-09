@@ -15,7 +15,7 @@
 
 ## 本轮测试证据
 
-`cargo test --workspace` 当前通过 **93 项**（CLI 16、core 单元 4、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 11、runtime semantics 9、skill policy 5、storage lifecycle 9，另 0 个 doc test）。`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo fmt --all -- --check` 已通过。
+`cargo test --workspace` 当前通过 **135 项**（CLI 38、core 单元 19、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9，另 0 个 doc test）。`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo fmt --all -- --check` 已通过。
 
 测试 HTTP/Facet/OAuth fixture 使用 `rpi_core::test_support::bind_loopback()`，只在 301–399 中轮询并在服务启动前持有 listener；OAuth 测试回调为 301–399，脚本 smoke/Web/Chrome CDP 端口也强制 300–400。生产运行时仍允许用户配置任意 loopback 端口；“300–400”是测试约束，不是模型或网络协议限制。
 
