@@ -157,6 +157,7 @@ pub struct AgentRuntime {
     pub tools: ToolRegistry,
     pub sessions_store: SessionStore,
     pub projects: ProjectStore,
+    pub attachments: crate::attachments::AttachmentStore,
     provider: Provider,
     router: Arc<dyn TaskRouter>,
     projector: Arc<dyn ContextProjector>,
@@ -251,6 +252,11 @@ impl AgentRuntime {
         };
         let projects =
             ProjectStore::open(config.data_dir.join("projects.json"), config.durable_logs).await?;
+        let attachments = crate::attachments::AttachmentStore::open(
+            config.data_dir.join("attachments.json"),
+            config.durable_logs,
+        )
+        .await?;
         let network = builder
             .network
             .unwrap_or_else(|| Arc::new(config.network.clone()));
@@ -305,6 +311,7 @@ impl AgentRuntime {
             tools,
             sessions_store,
             projects,
+            attachments,
             _store_lock: store_lock,
         });
         runtime.tools.bind_objects(runtime.objects.clone());
@@ -337,7 +344,37 @@ impl AgentRuntime {
             runtime.objects.register(Arc::new(facet))?;
         }
         runtime.objects.activate().await?;
+        // 项目制平滑迁移：已有会话但清单为空时创建默认项目并把存量会话归入。
+        // 幂等：projects 非空或 sessions 为空时为零操作。
+        runtime.migrate_default_project().await;
         Ok(runtime)
+    }
+    /// 存量数据的项目制迁移：首个会话存在且项目清单为空 → 建默认项目并归属。
+    async fn migrate_default_project(&self) {
+        let Ok(sessions) = self.sessions_store.list().await else {
+            return;
+        };
+        if sessions.is_empty() || !self.projects.list().await.is_empty() {
+            return;
+        }
+        let created = match self.projects.create("默认项目".into(), None).await {
+            Ok(project) => project,
+            Err(error) => {
+                tracing::warn!(error = %error, "默认项目创建失败，存量会话保持未分类");
+                return;
+            }
+        };
+        let id = created.id.clone();
+        for session in &sessions {
+            if let Err(error) = self
+                .sessions_store
+                .set_project(&session.id, Some(id.clone()))
+                .await
+            {
+                tracing::warn!(session = %session.id, error = %error, "存量会话归入默认项目失败");
+            }
+        }
+        tracing::info!(project = %id, sessions = sessions.len(), "已把存量会话归入默认项目");
     }
     /// Install typed Rust tool Objects before admitting tasks.
     pub async fn register_tool(&self, object: Arc<dyn Object>) -> Result<()> {

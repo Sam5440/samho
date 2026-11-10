@@ -3,13 +3,13 @@
 // main.js 通过 onSwitchWorkspace 完成前缀切换与数据重载。
 
 import { h, cn, button, openMenu, toast } from './ui.js';
-import { createSessionSidebar } from './sessions.js';
+import { createProjectSidebar } from './projects-tree.js';
 import {
   listWorkspaces, newWorkspaceDialog, renameWorkspaceDialog, removeWorkspaceDialog,
   workspaceIdFromLocation,
 } from './workspaces.js';
 
-export function createWorkbenchSidebar({ container, onSelect, onNewSession, onSwitchWorkspace }) {
+export function createWorkbenchSidebar({ container, onSelect, onNewSession, onSwitchWorkspace, onChanged }) {
   let records = [];
   // 直接以 /w/{id} 打开页面时，初始活动工作区取自 URL。
   let currentWs = workspaceIdFromLocation();
@@ -17,7 +17,8 @@ export function createWorkbenchSidebar({ container, onSelect, onNewSession, onSw
 
   const list = h('nav', { class: 'ws-list min-h-0', 'aria-label': '工作区列表' });
   const chatPane = h('div', { class: 'sidebar-pane min-h-0', role: 'tabpanel', 'aria-label': '当前工作区会话' });
-  const chat = createSessionSidebar({ container: chatPane, onSelect, onNewSession });
+  // 项目制会话树：工作区内按项目分组（文件夹 + 会话 + 附属面板折叠行）。
+  const chat = createProjectSidebar({ container: chatPane, onSelect, onNewSession, onChanged });
   const addBtn = button('＋ 新建工作区', {
     'data-variant': 'default', class: 'session-new',
     // 创建成功后走统一切换流（前缀/pushState/数据重载都由 main.js 驱动）。
@@ -114,6 +115,7 @@ export function createWorkbenchSidebar({ container, onSelect, onNewSession, onSw
       await reload(switchTo);
     },
     setCurrent(id) { chat.setCurrent(id); },
+    setAttachPanel(panel) { chat.setAttachPanel?.(panel); },
     get currentId() { return chat.currentId; },
     get currentWorkspace() { return currentWs; },
   };

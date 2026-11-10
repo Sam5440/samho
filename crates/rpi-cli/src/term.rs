@@ -14,7 +14,7 @@ use axum::response::Response;
 use axum::response::Sse;
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -44,6 +44,8 @@ struct TermSession {
     output: broadcast::Sender<String>,
     history: Arc<Mutex<VecDeque<String>>>,
     last_active: Instant,
+    /// 所属 Agent 会话（附属面板绑定）；None = 工作区级终端（未归属）。
+    session_id: Option<String>,
 }
 
 impl TermHub {
@@ -73,6 +75,7 @@ impl TermHub {
     pub(crate) async fn open(
         &self,
         cwd: Option<String>,
+        session_id: Option<String>,
     ) -> Result<(String, broadcast::Receiver<String>), ApiError> {
         let root = self.root.clone();
         let cwd_path = match cwd.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -163,10 +166,26 @@ impl TermHub {
                 output: tx,
                 history,
                 last_active: Instant::now(),
+                session_id,
             },
         );
         drop(child);
         Ok((id, rx))
+    }
+
+    /// 会话附属终端列表（仅本轮服务仍存活的 PTY；重启后前端静默清绑）。
+    pub(crate) async fn list_by_session(&self, session_id: &str) -> Vec<Value> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .iter()
+            .filter(|(_, term)| term.session_id.as_deref() == Some(session_id))
+            .map(|(id, _term)| {
+                json!({
+                    "id": id,
+                    "session_id": session_id,
+                })
+            })
+            .collect()
     }
 
     pub(crate) async fn subscribe(
@@ -285,14 +304,46 @@ fn shell_command() -> CommandBuilder {
 pub(crate) struct TermOpen {
     #[serde(default)]
     cwd: Option<String>,
+    /// 附属归属：绑定到该 Agent 会话（附属面板）；缺省为工作区级终端。
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 pub(crate) async fn term_open(
     State(app): State<AppState>,
     Json(body): Json<TermOpen>,
 ) -> ApiResult<serde_json::Value> {
-    let (id, _) = app.terms.open(body.cwd).await?;
+    // 记录绑定是 best-effort：会话存在时才允许记名（避免孤儿 id 永远占位）。
+    if let Some(session_id) = &body.session_id
+        && app.runtime.session(session_id).await?.is_none()
+    {
+        return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    let (id, _) = app.terms.open(body.cwd, body.session_id).await?;
     Ok(Json(json!({ "id": id })))
+}
+
+/// GET /api/term?session_id=… —— 会话附属终端活体列表。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TermQuery {
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+pub(crate) async fn term_list(
+    State(app): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<TermQuery>,
+) -> ApiResult<Value> {
+    let session_id = query.session_id.as_deref().unwrap_or_default();
+    if session_id.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "需要 session_id".into()));
+    }
+    if app.runtime.session(session_id).await?.is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    let items = app.terms.list_by_session(session_id).await;
+    Ok(Json(json!({ "terms": items })))
 }
 
 #[derive(Deserialize)]
@@ -400,9 +451,9 @@ mod tests {
     async fn term_cap_enforced() {
         let dir = tempfile::tempdir().unwrap();
         let hub = TermHub::with_max(dir.path().to_path_buf(), 1);
-        let first = hub.open(None).await;
+        let first = hub.open(None, None).await;
         assert!(first.is_ok(), "第一个会话应可创建");
-        let second = hub.open(None).await;
+        let second = hub.open(None, None).await;
         assert!(second.is_err(), "超出上限应被拒绝");
         let (id, _) = first.unwrap();
         hub.close(&id).await.unwrap();
@@ -412,7 +463,7 @@ mod tests {
     async fn term_echoes_command_output() {
         let dir = tempfile::tempdir().unwrap();
         let hub = TermHub::with_max(dir.path().to_path_buf(), MAX_TERMS);
-        let (id, mut rx) = hub.open(None).await.expect("打开终端");
+        let (id, mut rx) = hub.open(None, None).await.expect("打开终端");
         // 等 shell 提示符出现再发命令，避免输出交叠影响断言。
         let _ = next_with_timeout(&mut rx, "\n").await;
         hub.write(&id, "echo rpi-term-marker-7f3a\r").await.unwrap();
@@ -421,14 +472,14 @@ mod tests {
             "应在超时前回显命令输出"
         );
         hub.close(&id).await.unwrap();
-        assert!(hub.open(None).await.is_ok(), "关闭后应可再次创建");
+        assert!(hub.open(None, None).await.is_ok(), "关闭后应可再次创建");
     }
 
     #[tokio::test]
     async fn term_resize_does_not_panic() {
         let dir = tempfile::tempdir().unwrap();
         let hub = TermHub::with_max(dir.path().to_path_buf(), MAX_TERMS);
-        let (id, _) = hub.open(None).await.expect("打开终端");
+        let (id, _) = hub.open(None, None).await.expect("打开终端");
         hub.resize(&id, 120, 40).await.unwrap();
         hub.close(&id).await.unwrap();
     }

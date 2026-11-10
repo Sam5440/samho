@@ -89,6 +89,61 @@
 .session-search [data-component="input"] { flex: 1; min-width: 0; width: auto; }
 .session-search [data-component="button"] { flex-shrink: 0; }
 
+/* ---------- 项目树（项目制侧栏） ---------- */
+.project-row { display: flex; flex-direction: column; }
+.project-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0.3rem 0.375rem;
+  border-radius: 0.375rem;
+  font-size: var(--text-ui-sm);
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+.project-row-main:hover { background: var(--muted); }
+.project-row.is-active > .project-row-main { background: var(--accent); color: var(--accent-foreground); }
+.project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-row .count { color: var(--subtle-foreground); font-size: var(--text-ui-xs); }
+.project-children { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.125rem 0 0.25rem 1.25rem; }
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.2rem 0.375rem;
+  font-size: var(--text-ui-xs);
+  color: var(--muted-foreground);
+}
+.folder-icon { flex-shrink: 0; }
+.folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-add { justify-content: flex-start; color: var(--subtle-foreground); }
+.project-new-session { justify-content: flex-start; color: var(--subtle-foreground); }
+
+/* 会话附属折叠行：默认隐藏消息主体，展开后呈现绑定 chips。 */
+.session-attach-toggle { color: var(--subtle-foreground); }
+.attach-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0.375rem 0.25rem 1.75rem;
+}
+.attach-btn { font-size: var(--text-ui-xs); }
+
+/* 项目文件夹管理行 */
+.folder-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.125rem;
+  border-bottom: 1px dashed var(--border);
+}
+.folder-manage-row:last-child { border-bottom: none; }
+
 /* 移动端侧栏抽屉开关：默认隐藏，≤820px 显示为顶栏按钮。 */
 .sidebar-toggle { display: none; }
 .sidebar-overlay { display: none; }

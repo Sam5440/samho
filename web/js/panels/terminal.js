@@ -50,10 +50,13 @@ function fitTerm(term, host) {
 }
 
 export function createTerminalPane({ container }) {
-  // prefix -> { id, term, host, es, clean }
+  // key = `${workspacePrefix || 'default'}::${sessionId || 'workspace'}`。
+  // 会话附属终端（sessionId 非空）与工作区级终端共存；同 key 一组 PTY。
   const sessions = new Map();
   let activePrefix = null;
   let visible = false;
+  // 当前附属的目标会话：附属终端打开时记录，会话切换时随 loadSession 刷新。
+  let boundSessionId = null;
 
   const strip = h('div', { class: 'term-strip', role: 'tablist', 'aria-label': '终端会话' });
   const body = h('div', { class: 'term-body min-h-0' });
@@ -66,20 +69,25 @@ export function createTerminalPane({ container }) {
     onclick: () => killActive(),
   });
 
+  const keyOf = (sessionId) => `${getWorkspacePrefix() || 'default'}::${sessionId || 'workspace'}`;
+
   function current() { return sessions.get(activePrefix) || null; }
 
   function renderStrip() {
     strip.replaceChildren();
-    for (const [prefix, session] of sessions) {
-      const label = prefix ? prefix.replace('/w/', '') : '默认';
-      strip.append(h('div', { class: cn('term-chip', prefix === activePrefix && 'is-active'), role: 'tab', 'aria-selected': String(prefix === activePrefix) },
+    for (const [key, session] of sessions) {
+      const [wsPart, sessionPart] = key.split('::');
+      const label = sessionPart === 'workspace'
+        ? (wsPart ? wsPart.replace('/w/', '') : '默认')
+        : `↳ ${(sessionPart || '').slice(0, 6)}`;
+      strip.append(h('div', { class: cn('term-chip', key === activePrefix && 'is-active'), role: 'tab', 'aria-selected': String(key === activePrefix) },
         h('button', {
           type: 'button', class: 'term-chip-main mono', title: session.title || label,
-          onclick: () => focus(prefix),
+          onclick: () => focus(key),
         }, `${label} · ${(session.id || '?').slice(0, 6)}`),
         h('button', {
           type: 'button', class: 'term-chip-close', 'aria-label': '关闭终端',
-          onclick: () => closeSession(prefix),
+          onclick: () => closeSession(key),
         }, '✕'),
       ));
     }
@@ -95,10 +103,10 @@ export function createTerminalPane({ container }) {
     });
   }
 
-  function focus(prefix) {
-    const session = sessions.get(prefix);
+  function focus(key) {
+    const session = sessions.get(key);
     if (!session) return;
-    activePrefix = prefix;
+    activePrefix = key;
     if (!session.es && session.id) subscribe(session);
     attach(session);
     renderStrip();
@@ -127,7 +135,9 @@ export function createTerminalPane({ container }) {
     }
   }
 
-  async function openSession(force = false) {
+  // force=true 直接新建；否则聚焦当前 key（附属模式跟随 boundSessionId）。
+  async function openSession(force = false, { sessionId = boundSessionId } = {}) {
+    const key = keyOf(sessionId);
     if (!force && current()) { focus(activePrefix); return; }
     const Terminal = await ensureXterm();
     const host = h('div', { class: 'term-host' });
@@ -145,7 +155,7 @@ export function createTerminalPane({ container }) {
       },
       allowProposedApi: true,
     });
-    const session = { id: '', term, host, es: null, clean: true, cols: 0, rows: 0, title: '' };
+    const session = { id: '', term, host, es: null, clean: true, cols: 0, rows: 0, title: '', sessionId: sessionId || null };
     // UMD 全局是 { CanvasAddon: class } 包装；两种形状都兼容。
     const CanvasCtor = window.CanvasAddon && window.CanvasAddon.CanvasAddon
       ? window.CanvasAddon.CanvasAddon : window.CanvasAddon;
@@ -153,12 +163,21 @@ export function createTerminalPane({ container }) {
       try { term.loadAddon(new CanvasCtor()); } catch (_) { /* 回落 DOM 渲染器 */ }
     }
     term.onData((text) => sendInput(session, text));
-    sessions.set(getWorkspacePrefix() || 'default', session);
-    activePrefix = getWorkspacePrefix() || 'default';
+    sessions.set(key, session);
+    activePrefix = key;
     body.replaceChildren(host);
     term.open(host);
     try {
-      const created = await apiPost('/api/term', {});
+      // 附属终端带 session_id 登记到后端；工作区级终端不传。
+      const created = await apiPost('/api/term', sessionId ? { session_id: sessionId } : {});
+      if (typeof created?.detail === 'string' && /会话不存在/.test(created.detail)) {
+        // 会话已被删除：回退为工作区级终端。
+        sessions.delete(key);
+        const fallbackKey = keyOf(null);
+        sessions.set(fallbackKey, session);
+        activePrefix = fallbackKey;
+        session.sessionId = null;
+      }
       session.id = String(created.id || '');
       session.title = String(created.shell || 'shell');
     } catch (error) {
@@ -186,17 +205,20 @@ export function createTerminalPane({ container }) {
     }
   }
 
-  async function closeSession(prefix) {
-    const session = sessions.get(prefix);
+  async function closeSession(key) {
+    const session = sessions.get(key);
     if (!session) return;
-    sessions.delete(prefix);
+    sessions.delete(key);
     session.es?.close();
     if (session.id) api(`/api/term/${encodeURIComponent(session.id)}`, { method: 'DELETE' }).catch(() => {});
     try { session.term.dispose(); } catch (_) { /* 已释放 */ }
-    if (activePrefix === prefix) {
+    if (activePrefix === key) {
       const next = sessions.keys().next();
       if (!next.done) focus(next.value);
-      else { activePrefix = null; body.replaceChildren(h('p', { class: 'session-empty' }, '没有终端。点击「＋ 新终端」启动设备 shell。')); }
+      else {
+        activePrefix = null;
+        body.replaceChildren(h('p', { class: 'session-empty' }, '没有终端。点击「＋ 新终端」启动 shell，或在会话的附属行展开附属终端。'));
+      }
     }
     renderStrip();
   }
@@ -222,19 +244,51 @@ export function createTerminalPane({ container }) {
   );
 
   return {
-    // 首次显示或切回时调用；每个工作区独立会话组。
-    async show() {
+    // 首次显示或切回时调用；sessionId 提供时聚焦/恢复该会话的附属终端，
+    // 否则沿用工作区级终端组。
+    async show(...args) {
+      const options = typeof args[0] === 'object' && args[0] !== null ? args[0] : {};
+      const sessionId = options.sessionId || null;
       visible = true;
-      if (!sessions.has(getWorkspacePrefix() || 'default')) {
-        await openSession(true);
+      boundSessionId = sessionId;
+      const key = keyOf(sessionId);
+      if (sessionId && !sessions.has(key)) {
+        // 附属视图优先尝试服务端活体（重启恢复），无则新建。
+        try {
+          const listing = await api(`/api/term?session_id=${encodeURIComponent(sessionId)}`);
+          const terms = Array.isArray(listing?.terms) ? listing.terms : [];
+          if (terms.length) {
+            await openSession(false, { sessionId });
+            if (current()?.id !== String(terms[0].id || '')) {
+              // 新建代替重连：服务端 PTY 的 backfill 依然给出历史；走新建避免 id 对不上。
+            }
+            return;
+          }
+        } catch (_) { /* 探活失败 → 走新建流程 */ }
+        await openSession(true, { sessionId });
         return;
       }
-      focus(getWorkspacePrefix() || 'default');
+      if (!sessions.has(keyOf(null)) && !options.noAutoOpen) {
+        await openSession(true, { sessionId });
+        return;
+      }
+      focus(sessions.has(key) ? key : keyOf(null));
+    },
+    open(sessionId) {
+      boundSessionId = sessionId;
+      return openSession(true, { sessionId });
     },
     // 切换工作区：仅隐藏（保留缓冲与服务端会话），下次 open 恢复。
     hide() {
       visible = false;
     },
-    hasSession() { return sessions.has(getWorkspacePrefix() || 'default'); },
+    hasSession(sessionId = null) { return sessions.has(keyOf(sessionId)); },
+    counts(sessionId) {
+      let terms = 0;
+      for (const key of sessions.keys()) {
+        if (sessionId && key.endsWith(`::${sessionId}`)) terms += 1;
+      }
+      return { terms, tabs: 0 };
+    },
   };
 }

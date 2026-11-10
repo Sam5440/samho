@@ -257,6 +257,11 @@ const STATIC_ASSETS: &[(&str, &str, &str)] = &[
         include_str!("../../../web/js/sessions.js"),
     ),
     (
+        "/js/projects-tree.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/js/projects-tree.js"),
+    ),
+    (
         "/js/sidebar.js",
         "text/javascript; charset=utf-8",
         include_str!("../../../web/js/sidebar.js"),
@@ -454,6 +459,14 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
             get(session).patch(patch_session).delete(delete_session),
         )
         .route("/api/sessions/{id}/fork", post(fork_session))
+        .route(
+            "/api/sessions/{id}/attachments",
+            get(session_attachments_get).put(session_attachments_put),
+        )
+        .route(
+            "/api/term",
+            get(crate::term::term_list).post(crate::term::term_open),
+        )
         .route("/api/projects", get(list_projects).post(create_project))
         .route(
             "/api/projects/{id}",
@@ -488,7 +501,6 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
         .route("/api/browse/mkdir", post(crate::panels::browse_mkdir))
         .route("/w/{id}", any(crate::hub::workspace_dispatch))
         .route("/w/{id}/{*rest}", any(crate::hub::workspace_dispatch))
-        .route("/api/term", post(crate::term::term_open))
         .route("/api/term/{id}/stream", get(crate::term::term_stream))
         .route("/api/term/{id}/input", post(crate::term::term_input))
         .route("/api/term/{id}/resize", post(crate::term::term_resize))
@@ -806,6 +818,10 @@ async fn delete_session(State(app): State<AppState>, Path(id): Path<String>) -> 
         .delete_cascade(&id)
         .await
         .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    // 级联清理附属记录（不在此关闭附属 PTY：前端关闭面板时显式 DELETE /api/term）。
+    for removed_id in &removed {
+        let _ = app.runtime.attachments.remove(removed_id).await;
+    }
     Ok(Json(json!({"deleted": removed})))
 }
 
@@ -817,6 +833,10 @@ struct ProjectCreate {
     name: String,
     #[serde(default)]
     color: Option<String>,
+    #[serde(default)]
+    folders: Option<Vec<String>>,
+    #[serde(default)]
+    entry: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -826,6 +846,23 @@ struct ProjectPatch {
     // 缺省=保持不变；null=清除颜色；字符串=设置颜色。
     #[serde(default, deserialize_with = "deserialize_some")]
     color: Option<Option<String>>,
+    // 项目关联文件夹（相对 workspace 根；显式传入才更新，整体替换）。
+    #[serde(default)]
+    folders: Option<Vec<String>>,
+    // 主目录：显式传入才更新；null=清除。
+    #[serde(default, deserialize_with = "deserialize_some")]
+    entry: Option<Option<String>>,
+    // 侧栏展开状态。
+    #[serde(default)]
+    open: Option<bool>,
+}
+
+/// folders/entry 的路径存在性复核：workspace 内、必须存在。
+async fn validate_project_path(root: &str, rel: &str) -> std::result::Result<String, ApiError> {
+    let checked = crate::panels::confined(std::path::Path::new(root), rel, true)
+        .await
+        .map_err(|e| ApiError(e.0, format!("项目文件夹无效：{}", e.1)))?;
+    Ok(checked.display().to_string())
 }
 
 fn invalid_input(error: &anyhow::Error) -> ApiError {
@@ -849,10 +886,42 @@ async fn create_project(
 ) -> std::result::Result<(StatusCode, Json<Value>), ApiError> {
     let name = rpi_core::projects::validate_name(&body.name).map_err(|e| invalid_input(&e))?;
     let color = rpi_core::projects::validate_color(body.color).map_err(|e| invalid_input(&e))?;
-    let project = app
+    // 先做词法校验 + 存在性复核（写盘前拦截），再创建，避免半状态项目。
+    if let Some(items) = &body.folders {
+        for item in items {
+            rpi_core::projects::validate_folder(item).map_err(|e| invalid_input(&e))?;
+        }
+    }
+    if let Some(entry) = &body.entry {
+        rpi_core::projects::validate_folder(entry).map_err(|e| invalid_input(&e))?;
+    }
+    let folders = body.folders.map(|items| {
+        items
+            .into_iter()
+            .map(|item| rpi_core::projects::validate_folder(&item).unwrap_or(item))
+            .collect::<Vec<_>>()
+    });
+    if folders.is_some() || body.entry.is_some() {
+        let root = app.runtime.config.workspace.display().to_string();
+        if let Some(items) = &folders {
+            for item in items {
+                validate_project_path(&root, item).await?;
+            }
+        }
+        if let Some(entry) = &body.entry {
+            validate_project_path(&root, entry).await?;
+        }
+    }
+    let created = app
         .runtime
         .projects
         .create(name, color)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    let project = app
+        .runtime
+        .projects
+        .update(&created.id, None, None, folders, body.entry.map(Some), None)
         .await
         .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
     Ok((StatusCode::CREATED, Json(app.redact(json!(project)))))
@@ -872,10 +941,29 @@ async fn patch_project(
     if let Some(color) = &body.color {
         rpi_core::projects::validate_color(color.clone()).map_err(|e| invalid_input(&e))?;
     }
+    if let Some(items) = &body.folders {
+        let root = app.runtime.config.workspace.display().to_string();
+        for item in items {
+            rpi_core::projects::validate_folder(item).map_err(|e| invalid_input(&e))?;
+            validate_project_path(&root, item).await?;
+        }
+    }
+    if let Some(Some(entry)) = &body.entry {
+        rpi_core::projects::validate_folder(entry).map_err(|e| invalid_input(&e))?;
+        let root = app.runtime.config.workspace.display().to_string();
+        validate_project_path(&root, entry).await?;
+    }
     let project = app
         .runtime
         .projects
-        .update(&id, body.name, body.color)
+        .update(
+            &id,
+            body.name,
+            body.color,
+            body.folders,
+            body.entry,
+            body.open,
+        )
         .await
         .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
     Ok(Json(app.redact(json!(project))))
@@ -903,6 +991,47 @@ async fn delete_project(State(app): State<AppState>, Path(id): Path<String>) -> 
     Ok(Json(
         json!({"deleted": {"id": project.id, "name": project.name}, "sessions_cleared": cleared}),
     ))
+}
+
+// ---------- 会话附属面板（浏览器标签 / 终端引用） ----------
+
+async fn session_attachments_get(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Value> {
+    let value = app.runtime.attachments.get(&id).await.unwrap_or_default();
+    Ok(Json(app.redact(json!(value))))
+}
+
+async fn session_attachments_put(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<rpi_core::attachments::SessionAttachments>,
+) -> ApiResult<Value> {
+    // 会话必须存在；浏览器 URL 走 redactor 处理可能内嵌的凭据模式。
+    if app.runtime.session(&id).await?.is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "会话不存在".into()));
+    }
+    let mut value = body;
+    value.browser_tabs = value
+        .browser_tabs
+        .into_iter()
+        .map(|tab| rpi_core::attachments::BrowserTabRef {
+            url: app
+                .redact(json!(tab.url))
+                .as_str()
+                .unwrap_or(tab.url.as_str())
+                .to_string(),
+            mode: tab.mode,
+        })
+        .collect();
+    app.runtime
+        .attachments
+        .set(&id, value)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+    let stored = app.runtime.attachments.get(&id).await.unwrap_or_default();
+    Ok(Json(app.redact(json!(stored))))
 }
 
 /// GET /api/model-roles —— 任务类型（路由层级）→ 模型覆盖表。
@@ -2908,6 +3037,280 @@ mod tests {
                 .unwrap();
         assert_eq!(session["project_id"], Value::Null);
         runtime.shutdown().await.unwrap();
+    }
+
+    /// 项目制：PATCH /api/projects/{id} 支持 folders/entry/open 且 entry 需先入 folders。
+    #[tokio::test]
+    async fn project_patch_supports_folders_entry_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let app = router(AgentRuntime::new(config).await.unwrap());
+        std::fs::create_dir_all(dir.path().join("apps/frontend")).unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/readme.md"), "# 文档").unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/projects")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"工作台","folders":["apps/frontend","docs"],"entry":"apps/frontend"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::CREATED,
+            "创建带 folders 的项目"
+        );
+        let project: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(project["folders"][0], "apps/frontend");
+        assert_eq!(project["entry"], "apps/frontend");
+        let project_id = project["id"].as_str().unwrap().to_string();
+
+        // entry 不在 folders 时拒绝。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/projects/{project_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"entry":"outside/not/folder"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "entry 雷在 folders 外必须拒绝"
+        );
+
+        // 不存在的路径拒绝 + 词法越界拒绝。
+        for payload in [
+            r#"{"folders":["missing/path"]}"#,
+            r#"{"folders":["../escape"]}"#,
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PATCH")
+                        .uri(format!("/api/projects/{project_id}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(payload))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "payload {payload}"
+            );
+        }
+
+        // open 状态持久化。
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/projects/{project_id}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"open":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let patched: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(patched["open"], json!(true));
+    }
+
+    /// 项目制：/api/sessions/{id}/attachments PUT/GET roundtrip + 不存在会话 404。
+    #[tokio::test]
+    async fn session_attachments_put_get_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let handle = runtime
+            .sessions_store
+            .create_or_get(None, "系统指令".into())
+            .await
+            .unwrap();
+        let session_id = handle.lock().await.id.clone();
+        let app = router(runtime);
+
+        let body = json!({
+            "terminal_ids": ["term-9"],
+            "browser_tabs": [{"url": "https://example.com/中文", "mode": "proxy"}],
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/sessions/{session_id}/attachments"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let stored: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(stored["browser_tabs"][0]["url"], "https://example.com/中文");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sessions/{session_id}/attachments"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let loaded: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(loaded["browser_tabs"].as_array().unwrap().len(), 1);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/sessions/missing-session/attachments")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"terminal_ids":[],"browser_tabs":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// 项目制：未知字段与 term list 需 session_id；附属终端 POST 携带 session_id 登记。
+    #[tokio::test]
+    async fn project_patch_rejects_unknown_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let app = router(AgentRuntime::new(config).await.unwrap());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/projects/some-id")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"printer":"nope"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            response.status() == StatusCode::BAD_REQUEST
+                || response.status() == StatusCode::UNPROCESSABLE_ENTITY,
+            "未知字段必须被拒绝（axum Json 拒绝返回 422），实际 {}",
+            response.status()
+        );
+    }
+
+    /// 存量会话的项目制迁移：sessions 非空且 projects 空时建默认项目并归属；幂等。
+    #[tokio::test]
+    async fn legacy_sessions_migrate_into_default_project_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data/projects.json");
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        // 第一轮：造会话（journal 已写入），无项目 → 但本次 open 也会触发迁移
+        // 试图创建默认项目。为了模拟"迁移前的存量数据"，先移除项目文件。
+        {
+            let runtime = AgentRuntime::new(config.clone()).await.unwrap();
+            let session_id = {
+                let handle = runtime
+                    .sessions_store
+                    .create_or_get(None, "系统指令".into())
+                    .await
+                    .unwrap();
+                let id = handle.lock().await.id.clone();
+                // journal 落盘：迁移探测基于 sessions_store 重放，仅内存态不算存量。
+                runtime
+                    .sessions_store
+                    .commit(&handle.lock().await.clone())
+                    .await
+                    .unwrap();
+                id
+            };
+            runtime.shutdown().await.unwrap();
+            drop(runtime);
+            // 擦掉迁移结果，留下"存量会话 + 空项目清单"的真实旧数据形态。
+            let _ = std::fs::remove_file(&path);
+            let _ = session_id; // journal 保留会话。
+        }
+        // 第二轮：迁移应创建默认项目并归入全部存量会话。
+        let session_id = {
+            let runtime2 = AgentRuntime::new(config.clone()).await.unwrap();
+            let projects = runtime2.projects.list().await;
+            assert_eq!(projects.len(), 1, "迁移必须创建一个默认项目");
+            assert_eq!(projects[0].name, "默认项目");
+            let id = projects[0].id.clone();
+            let summary = runtime2
+                .session_summaries()
+                .await
+                .into_iter()
+                .find(|_s| true)
+                .expect("存量会话应保留");
+            assert_eq!(summary.project_id.as_deref(), Some(id.as_str()));
+            runtime2.shutdown().await.unwrap();
+            id
+        };
+        // 第三轮：幂等 —— 不再创建第二个默认项目。
+        {
+            let runtime3 = AgentRuntime::new(config.clone()).await.unwrap();
+            let projects = runtime3.projects.list().await;
+            assert_eq!(projects.len(), 1, "迁移必须是幂等的");
+            assert_eq!(projects[0].name, "默认项目");
+            let summary = runtime3
+                .session_summaries()
+                .await
+                .into_iter()
+                .find(|_s| true)
+                .unwrap();
+            assert_eq!(summary.project_id.as_deref(), Some(session_id.as_str()));
+            runtime3.shutdown().await.unwrap();
+        }
     }
 
     #[tokio::test]

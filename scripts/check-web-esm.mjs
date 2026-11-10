@@ -15,6 +15,11 @@ const files = [
   'web/js/sidebar.js',
   'web/js/store.js',
   'web/js/ui.js',
+  'web/js/projects-tree.js',
+  'web/js/projects.js',
+  'web/js/sessions.js',
+  'web/js/panels/terminal.js',
+  'web/js/panels/browser.js',
 ];
 let bad = 0;
 for (const file of files) {

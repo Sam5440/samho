@@ -3,6 +3,7 @@
 //! Shared async orchestration for TUI, local Web GUI and embedded applications.
 
 pub mod agent;
+pub mod attachments;
 pub mod budget;
 pub mod config;
 pub mod context;
@@ -23,6 +24,7 @@ pub mod test_support;
 pub mod tools;
 
 pub use agent::{AgentRuntime, RuntimeBuilder, TaskProgress, TaskRequest, TaskResult};
+pub use attachments::{AttachmentStore, SessionAttachments};
 pub use config::RuntimeConfig;
 pub use events::{EventLog, TraceEvent, TraceId};
 pub use model::{ModelDescriptor, ModelRouter, ModelTier, RouteDecision, TaskProfile, TaskRouter};

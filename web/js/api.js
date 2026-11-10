@@ -54,6 +54,14 @@ export function apiPatch(path, payload) {
   });
 }
 
+export function apiPut(path, payload) {
+  return api(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  });
+}
+
 export function apiDelete(path) {
   return api(path, { method: 'DELETE' });
 }

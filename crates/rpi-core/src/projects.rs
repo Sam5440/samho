@@ -15,6 +15,33 @@ pub struct Project {
     #[serde(default)]
     pub color: Option<String>,
     pub created_at: u64,
+    /// 项目关联的文件夹（相对 workspace 根的路径，存在性由 API 层用
+    /// confined 复核；store 只做词法校验）。
+    #[serde(default)]
+    pub folders: Vec<String>,
+    /// 主目录（默认 cwd / 文件面板起始位置），一等公民显示。
+    #[serde(default)]
+    pub entry: Option<String>,
+    /// 侧栏展开状态后端兜底（重启 UI 还原）。
+    #[serde(default)]
+    pub open: bool,
+}
+
+/// folders 项的词法校验：相对路径、无 `..`/盘符/反斜杠段；入口路径可选。
+pub fn validate_folder(rel: &str) -> Result<String> {
+    let trimmed = rel.trim().trim_matches(|c| c == '/' || c == '\\');
+    anyhow::ensure!(!trimmed.is_empty(), "文件夹路径不能为空");
+    anyhow::ensure!(
+        !trimmed.contains(':') && !trimmed.contains('\\'),
+        "文件夹须为 workspace 内的相对路径（用 / 分隔）"
+    );
+    for segment in trimmed.split('/') {
+        anyhow::ensure!(
+            !segment.is_empty() && segment != "." && segment != "..",
+            "文件夹路径不允许空段或 .. 段"
+        );
+    }
+    Ok(trimmed.to_string())
 }
 
 pub fn validate_name(name: &str) -> Result<String> {
@@ -97,6 +124,9 @@ impl ProjectStore {
             name,
             color,
             created_at: now_ms(),
+            folders: Vec::new(),
+            entry: None,
+            open: false,
         };
         // 先持久化候选快照，成功后再替换内存：写盘失败时 API 报错且内存不变，
         // 不再出现“API 失败但内存已变更”的漂移。
@@ -108,11 +138,17 @@ impl ProjectStore {
     }
 
     /// name=None 保持；color=Some(None) 清除颜色、Some(Some(hex)) 设置。
+    /// folders/entry/open 仅在显式传入 Some 时更新（folders 逐项词法校验并
+    /// 去重；entry 同步校验；两者都指向 workspace 内相对路径，存在性由
+    /// API 层用 confined 复核）。
     pub async fn update(
         &self,
         id: &str,
         name: Option<String>,
         color: Option<Option<String>>,
+        folders: Option<Vec<String>>,
+        entry: Option<Option<String>>,
+        open: Option<bool>,
     ) -> Result<Project> {
         let mut guard = self.projects.lock().await;
         let mut candidate = guard.clone();
@@ -126,6 +162,40 @@ impl ProjectStore {
         if let Some(color) = color {
             let color = validate_color(color)?;
             candidate.get_mut(id).context("项目不存在")?.color = color;
+        }
+        if let Some(items) = folders {
+            let mut normalized: Vec<String> = Vec::new();
+            for item in items {
+                let item = validate_folder(&item)?;
+                if !normalized.contains(&item) {
+                    normalized.push(item);
+                }
+            }
+            let project = candidate.get_mut(id).context("项目不存在")?;
+            project.folders = normalized;
+            // entry 不再属于 folders 时会被清掉（保持一致性而非拦截）。
+            if let Some(entry) = &project.entry
+                && !project.folders.contains(entry)
+            {
+                project.entry = None;
+            }
+        }
+        if let Some(entry) = entry {
+            let entry = match entry {
+                None => None,
+                Some(value) if value.trim().is_empty() => None,
+                Some(value) => Some(validate_folder(&value)?),
+            };
+            let project = candidate.get_mut(id).context("项目不存在")?;
+            if let Some(value) = &entry
+                && !project.folders.contains(value)
+            {
+                bail!("主目录必须先加入项目文件夹列表");
+            }
+            project.entry = entry;
+        }
+        if let Some(value) = open {
+            candidate.get_mut(id).context("项目不存在")?.open = value;
         }
         let project = candidate.get(id).context("项目不存在")?.clone();
         self.persist(&candidate).await?;
@@ -185,13 +255,27 @@ mod tests {
         assert!(store.create("x".repeat(65), None).await.is_err());
         assert!(
             store
-                .update(&project.id, None, Some(Some("blue".into())))
+                .update(
+                    &project.id,
+                    None,
+                    Some(Some("blue".into())),
+                    None,
+                    None,
+                    None
+                )
                 .await
                 .is_err()
         );
 
         let renamed = store
-            .update(&project.id, Some("评测基准".into()), Some(None))
+            .update(
+                &project.id,
+                Some("评测基准".into()),
+                Some(None),
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(renamed.name, "评测基准");

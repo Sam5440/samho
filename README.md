@@ -38,6 +38,7 @@ cargo run -p rpi -- --config rpi.toml serve
 
 ## 已实现
 
+- **项目制工作区管理**：工作区内按「项目」组织——项目可关联多个 workspace 文件夹（entry 为主目录，新会话终端/文件面板默认起始），项目下展开多个会话；每个会话可挂附属终端/浏览器（默认折叠，浏览器标签持久化到 attachments.json，重启后按会话恢复）。存量会话首次启动自动归入「默认项目」（幂等迁移）。
 - Object 公共契约、依赖拓扑、失败回滚、逆序销毁，以及运行时/Model/Tool/Skill/MCP server 的注册与调用。
 - 异步 Agent 循环、任务并发限制、取消、失败状态、会话持久化与重启恢复；可注册自定义 Rust Tool。
 - 六级模型策略：`nano / fast / balanced / reasoning / frontier / specialist`，可配置分类规则、评分权重、上下文、预算、延迟和能力约束；手动指定 tier 或 model。

@@ -60,3 +60,26 @@ test('流式正文不再作为 aria-live 区域整段重播', () => {
   assert.match(source, /announce/, '需要 sr-only 状态播报入口');
   assert.match(source, /role: 'status'/, '播报节点应为 role=status');
 });
+
+test('项目制侧栏：项目树不使用 innerHTML，附属行默认折叠', () => {
+  const tree = read('web/js/projects-tree.js');
+  assert.equal(tree.includes('innerHTML'), false, '项目树不得使用 innerHTML');
+  assert.match(tree, /attachOpenSet/, '附属行展开状态集合');
+  // 默认折叠：只有点击 toggle 后加入 attachOpenSet 才渲染 attachRow。
+  assert.match(tree, /attachOpenSet\.has\(id\)/, '渲染前必须检查展开状态');
+  assert.match(tree, /projectOpenState/, '项目展开状态由后端 open 字段兜底');
+  assert.match(tree, /setAttachPanel/, '附属面板桥必须可注入');
+});
+
+test('后端项目制 API 契约：项目 patch 支持 folders/entry/open，附属面板可持久化', () => {
+  const server = read('crates/rpi-cli/src/server.rs');
+  assert.match(server, /session_attachments_get/, 'GET attachments handler');
+  assert.match(server, /session_attachments_put/, 'PUT attachments handler');
+  assert.match(server, /validate_project_path/, '文件夹路径需 confined 复核');
+  const term = read('crates/rpi-cli/src/term.rs');
+  assert.match(term, /list_by_session/, 'term list by session');
+  const projects = read('crates/rpi-core/src/projects.rs');
+  assert.match(projects, /pub folders/, 'Project.folders 字段');
+  assert.match(projects, /pub entry/, 'Project.entry 字段');
+  assert.match(read('crates/rpi-core/src/agent.rs'), /migrate_default_project/, '默认项目迁移');
+});

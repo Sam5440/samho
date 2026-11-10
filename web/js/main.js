@@ -111,6 +111,9 @@ async function loadSession(id, { force = false } = {}) {
   timeline.reset();
   syncTimeline();
   updateHeader();
+  // 活动 device 面板是终端/浏览器时，让附属绑定跟随当前会话（重连/恢复）。
+  if (dock?.active === 'term') terminal?.show({ sessionId: id }).catch(() => {});
+  if (dock?.active === 'browser') browser?.show({ sessionId: id }).catch(() => {});
   if (!id) return;
   try {
     const detail = await api(`/api/sessions/${encodeURIComponent(id)}`);
@@ -333,6 +336,14 @@ async function finishTask(response, task) {
       await loadSession(String(resultSession), { force: true });
     } else {
       await reloadSessionMessages(String(resultSession));
+    }
+    // 项目归属：从项目行发起的草稿任务落库后，把新会话归入该项目。
+    if (pendingProjectId) {
+      try {
+        await apiPatch(`/api/sessions/${encodeURIComponent(String(resultSession))}`, { project_id: pendingProjectId });
+        pendingProjectId = null;
+        await refreshSessions();
+      } catch (error) { toast(`归属项目失败：${error.message}`, 'error'); }
     }
   }
   const reason = response?.error || result?.error || '未知错误';
@@ -649,7 +660,11 @@ function setSidebarOpen(open) {
 }
 
 /* ---------- 装配 ---------- */
-function newSession() {
+// pendingProjectId：新草稿期望归属的项目（从项目行发起时设置）。
+let pendingProjectId = null;
+
+function newSession({ projectId } = {}) {
+  pendingProjectId = projectId || null;
   state.draftKeyValue = draftKey();
   state.currentSessionId = null;
   wsSessionMemory.set(currentWorkspaceId, null);
@@ -693,10 +708,29 @@ async function bootstrap() {
     // 移动端抽屉：选择会话/新建/切换工作区后收起抽屉。
     onSelect: (id, opts) => {
       setSidebarOpen(false);
-      return id ? loadSession(id) : newSession();
+      return id ? loadSession(id) : newSession(opts);
     },
-    onNewSession: () => { setSidebarOpen(false); newSession(); },
+    // 新会话可由项目行直接发起：附带归属项目 id（落库后自动设置 project_id）。
+    onNewSession: (projectId) => { setSidebarOpen(false); newSession({ projectId }); },
     onSwitchWorkspace: (id) => { setSidebarOpen(false); switchWorkspace(id); },
+    // 项目/文件夹元数据变化时刷新标题等（当前只影响 header）。
+    onChanged: () => updateHeader(),
+  });
+  // 会话附属面板桥：侧栏附属行通过它打开/恢复绑定终端/浏览器。
+  sidebar.setAttachPanel?.({
+    openTerminal: async (sessionId) => {
+      await dock.activate('term');
+      if (terminal?.open) await terminal.open(sessionId); else await terminal?.show({ sessionId });
+    },
+    openBrowser: async (sessionId) => {
+      await dock.activate('browser');
+      if (browser?.open) await browser.open(sessionId);
+    },
+    counts: (sessionId) => {
+      const terms = terminal?.counts?.(sessionId) || { terms: 0 };
+      const tabsShown = browser?.counts?.(sessionId) || { tabs: 0 };
+      return { terms: terms.terms || 0, tabs: tabsShown.tabs || 0 };
+    },
   });
   composer = createComposer({
     container: byId('composer-host'),
