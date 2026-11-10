@@ -333,7 +333,7 @@ impl Meta {
         }
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Delta {
     schema_version: u32,
     sequence: u64,
@@ -373,6 +373,91 @@ fn cascade_doomed(
     }
     doomed
 }
+
+/// 旧数据目录遗留 journal 的校验辅助：对"payload 原字节"做 SHA-256。
+/// serde flatten 写出的行是 `{"schema_version":…,"append_messages":[…],"checksum":"…"}` ——
+/// payload 与 checksum 共用同一个外层对象，外层收尾 `}` 位于行尾；
+/// payload 原字节即"checksum 键之前的内容 + 该收尾 `}`"。
+///
+/// 旧字段集 journal 的 stored checksum 正是对这段原字节计算的；当前版本的
+/// stored checksum 则来自 Struct Delta 重序列化（写键序一致，故 round-trip
+/// digest 不变）。两者都不匹配即数据损坏。不再经 serde_json::Value 往返 ——
+/// 默认 Map 按字母序排列，会改写键序字节、无法复算写入时的 digest。
+fn legacy_payload_digest(raw_record: &[u8]) -> Result<String> {
+    let marker = b"\"checksum\":";
+    let marker_pos = raw_record
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+        .context("journal record lacks a checksum field")?;
+    // marker 前必须是分隔逗号；含逗号前的 payload 全段。
+    if marker_pos == 0 || raw_record[marker_pos - 1] != b',' {
+        bail!("checksum marker has no leading comma");
+    }
+    let mut payload = raw_record[..marker_pos - 1].to_vec();
+    // serde flatten 让外层收尾 `}` 落在行尾；校验并补上凑齐 payload 原字节。
+    if raw_record.last() != Some(&b'}') {
+        bail!("record does not end with the outer closing brace");
+    }
+    payload.push(b'}');
+    Ok(format!("{:x}", Sha256::digest(&payload)))
+}
+
+/// 探测 journal 的 schema 代次（恒等关系：写入时 digest 用什么序列化，
+/// 重放就只有用什么序列化才校验得过）：
+/// - `digest(Record struct 重序列化) == stored` → 当前 schema；
+/// - 否则 `按原始字节 payload digest == stored` → 旧字段集 journal（可迁移）；
+/// - 两者皆非 → 数据损坏，按校验失败处理。
+///
+/// 当前 schema 的所有写入都发自同一 struct，round-trip 后 digest 不变，
+/// 因此该判据不会把现行 journal 误判为 legacy。
+fn legacy_meta_journal(records: &[Vec<u8>]) -> Result<bool> {
+    if records.is_empty() {
+        return Ok(false);
+    }
+    let mut all_legacy = true;
+    for (index, bytes) in records.iter().enumerate() {
+        let v: Value = serde_json::from_slice(bytes)
+            .with_context(|| format!("corrupt session journal record {}", index + 1))?;
+        if v.get("schema_version").is_none() {
+            // 非平铺 Delta（旧整段快照等）：交给 open_with_backend 常规路径。
+            return Ok(false);
+        }
+        let r: Record = serde_json::from_value(v.clone())
+            .with_context(|| format!("corrupt journal record {}", index + 1))?;
+        if digest(&r.payload)? == r.checksum {
+            all_legacy = false;
+        } else if legacy_payload_digest(bytes)? != r.checksum {
+            bail!("session checksum/sequence mismatch at {}", index + 1);
+        }
+    }
+    Ok(all_legacy)
+}
+
+/// 按 Delta 语义重放一条记录到 committed（拷贝自原 open_with_backend 内联逻辑），
+/// 返回会话 id 与投影后的完整会话。
+fn replay_delta(committed: &mut BTreeMap<String, Session>, p: &Delta) -> Result<(String, Session)> {
+    let mut messages = if let Some(s) = committed.get(&p.metadata.id) {
+        s.messages.clone()
+    } else if let Some(id) = &p.metadata.parent_id {
+        let source = committed.get(id).context("missing fork parent")?;
+        let cutoff = p.metadata.fork_cutoff.context("missing fork cutoff")?;
+        if cutoff > source.messages.len() {
+            bail!("fork cutoff exceeds parent");
+        }
+        source.messages[..cutoff].to_vec()
+    } else {
+        Vec::new()
+    };
+    if p.truncate_to > messages.len() {
+        bail!("delta cutoff exceeds session");
+    }
+    messages.truncate(p.truncate_to);
+    messages.extend(p.append_messages.clone());
+    let id = p.metadata.id.clone();
+    let session = p.metadata.clone().project(messages);
+    committed.insert(id.clone(), session.clone());
+    Ok((id, session))
+}
 struct JournalState {
     committed: BTreeMap<String, Session>,
     sequence: u64,
@@ -405,7 +490,16 @@ impl SessionStore {
         let mut committed = BTreeMap::<String, Session>::new();
         let mut sequence = 0;
         let mut checksum = String::new();
-        let mut legacy = false;
+        // 先探测 journal 的 schema 代次：旧字段集（archived/project_id 加入
+        // 之前）的 stored digest 是按文件原始键集算的，用当前 struct 重算必
+        // 失配。legacy journal 按原始键集校验整条链，通过则全部记录流式重放，
+        // 最后统一走 full-snapshot 重写迁移。
+        let mut legacy = legacy_meta_journal(&records).unwrap_or(false);
+        if legacy {
+            tracing::info!(
+                "session journal uses a pre-archive Meta field set; replaying with legacy digest and migrating"
+            );
+        }
         for (index, bytes) in records.iter().enumerate() {
             let v: Value = serde_json::from_slice(bytes)
                 .with_context(|| format!("corrupt session journal record {}", index + 1))?;
@@ -418,38 +512,25 @@ impl SessionStore {
                 legacy = true;
                 continue;
             }
-            if legacy {
-                bail!("mixed legacy and versioned journal");
-            }
-            let r: Record = serde_json::from_value(v)?;
+            // 平铺 Delta 记录：legacy 判定来自 probe（journal 级），单条记录
+            // 再按对应口径校验 checksum，防"探判定后又改写"的窗口。
+            let r: Record = serde_json::from_value(v.clone())?;
             let p = &r.payload;
             if p.schema_version != SESSION_SCHEMA_VERSION {
                 bail!("unsupported session schema {}", p.schema_version);
             }
+            let expected_checksum = if legacy {
+                legacy_payload_digest(bytes).context("legacy journal payload invalid")?
+            } else {
+                digest(p)?
+            };
             if p.sequence != sequence + 1
                 || p.previous_checksum != checksum
-                || digest(p)? != r.checksum
+                || expected_checksum != r.checksum
             {
                 bail!("session checksum/sequence mismatch at {}", index + 1);
             }
-            let mut messages = if let Some(s) = committed.get(&p.metadata.id) {
-                s.messages.clone()
-            } else if let Some(id) = &p.metadata.parent_id {
-                let source = committed.get(id).context("missing fork parent")?;
-                let cutoff = p.metadata.fork_cutoff.context("missing fork cutoff")?;
-                if cutoff > source.messages.len() {
-                    bail!("fork cutoff exceeds parent");
-                }
-                source.messages[..cutoff].to_vec()
-            } else {
-                Vec::new()
-            };
-            if p.truncate_to > messages.len() {
-                bail!("delta cutoff exceeds session");
-            }
-            messages.truncate(p.truncate_to);
-            messages.extend(p.append_messages.clone());
-            committed.insert(p.metadata.id.clone(), p.metadata.clone().project(messages));
+            replay_delta(&mut committed, p)?;
             sequence = p.sequence;
             checksum = r.checksum;
         }
@@ -938,5 +1019,118 @@ mod tests {
         let _ = committer.await;
         deleted.expect("并发提交场景下删除目标会话应当成功");
         assert!(store.get(&survivor.id).await.unwrap().is_some());
+    }
+
+    /// 回归：旧 Meta 字段集（无 archived/project_id）写就的数据目录遗留 journal
+    /// 曾导致启动报 "session checksum/sequence mismatch at 1"。现在必须：
+    /// 1) 按文件原始键集校验成功并自动迁移成新 schema（full-snapshot 重写）；
+    /// 2) 迁移后的会话消息无损；3) 迁移后新写入的校验链自洽、重启可复放。
+    #[tokio::test]
+    async fn legacy_meta_journal_is_detected_migrated_and_replayable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.jsonl");
+        let sid = "42424242-4242-4242-4242-424242424242".to_string();
+        // 手工构造旧字段集 record：Meta 不含 archived/project_id 键，
+        // checksum 按该键集整体序列化计算。
+        let mut legacy_meta = serde_json::Map::new();
+        for (key, value) in [
+            ("id", json!(sid.clone())),
+            ("title", json!("遗留会话")),
+            ("created_at", json!(1730000000000u64)),
+            ("updated_at", json!(1730000000000u64)),
+            ("status", json!("done")),
+            ("last_model", json!(serde_json::Value::Null)),
+            ("parent_id", json!(serde_json::Value::Null)),
+            ("fork_cutoff", json!(serde_json::Value::Null)),
+        ] {
+            legacy_meta.insert(key.into(), value);
+        }
+        let payload = json!({
+            "schema_version": 2,
+            "sequence": 1,
+            "previous_checksum": "",
+            "metadata": legacy_meta,
+            "truncate_to": 0,
+            "append_messages": [
+                json!({"role":"user","content":"旧问题"}),
+                json!({"role":"assistant","content":"旧回答"}),
+            ],
+        });
+        // serde_json 默认 Map = BTreeMap（字母序）。生产写入端用 serde 序列化
+        // struct（声明序），这里直接复刻生产端：用声明序的 raw 字符串计算
+        // stored digest，避免测试 fixture 因 Map 排序与真实 journal 漂移。
+        let payload_raw = {
+            let mut raw = String::new();
+            raw.push_str("{\"schema_version\":2,\"sequence\":1,\"previous_checksum\":\"\",");
+            raw.push_str(&format!(
+                "\"metadata\":{}",
+                serde_json::to_string(&payload["metadata"]).unwrap()
+            ));
+            raw.push_str(",\"truncate_to\":0,");
+            raw.push_str(&format!(
+                "\"append_messages\":{}",
+                serde_json::to_string(&payload["append_messages"]).unwrap()
+            ));
+            raw.push('}');
+            raw
+        };
+        let digest = format!("{:x}", Sha256::digest(payload_raw.as_bytes()));
+        // 行字节也按生产端声明序写入：payload_raw 去掉收尾 `}` 然后
+        // 接 checksum 字段与 outer 收尾 —— 与 serde flatten 输出一致。
+        let mut line = String::new();
+        line.push_str(&payload_raw[..payload_raw.len() - 1]); // 去掉 payload 收尾 }
+        line.push_str(&format!(",\"checksum\":\"{}\"}}", digest));
+        line.push('\n');
+        std::fs::write(&path, line).unwrap();
+
+        let store = SessionStore::open(&path, Redactor::new(Vec::new()), false)
+            .await
+            .unwrap();
+        let recovered = store.get(&sid).await.unwrap().expect("legacy 会话应恢复");
+        assert_eq!(recovered.title, "遗留会话");
+        assert_eq!(recovered.messages.len(), 2);
+        assert!(!recovered.archived, "迁移补默认值");
+
+        // 迁移把 journal 重写为新 schema：直接读文件，记录的 metadata 含新键，且可重放恢复。
+        let bytes = std::fs::read(&path).unwrap();
+        let migrated: Vec<Record> = bytes
+            .split(|b| *b == b'\n')
+            .filter(|v| !v.is_empty())
+            .map(|chunk| serde_json::from_slice(chunk).unwrap())
+            .collect();
+        assert_eq!(migrated.len(), 1);
+        assert!(
+            bytes.windows(10).any(|w| w == b"\"archived\""),
+            "迁移后应写入 archived 键"
+        );
+        assert!(
+            bytes.windows(12).any(|w| w == b"\"project_id\""),
+            "迁移后应写入 project_id 键"
+        );
+
+        // 迁移后继续写新提交，重启复放应完全一致。
+        let handle = store
+            .create_or_get(Some(sid.clone()), "系统指令".into())
+            .await
+            .unwrap();
+        handle
+            .lock()
+            .await
+            .messages
+            .push(json!({"role":"user","content":"新提交"}));
+        store.commit(&handle.lock().await.clone()).await.unwrap();
+        let reopened = SessionStore::open(&path, Redactor::new(Vec::new()), false)
+            .await
+            .unwrap();
+        let after = reopened.get(&sid).await.unwrap().unwrap();
+        assert_eq!(after.messages.len(), 3);
+        assert_eq!(
+            after
+                .messages
+                .last()
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_str),
+            Some("新提交")
+        );
     }
 }
