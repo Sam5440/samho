@@ -25,6 +25,8 @@ pub(crate) struct AppState {
     pub(crate) runtime: Arc<AgentRuntime>,
     tasks: Arc<RwLock<BTreeMap<String, TaskEntry>>>,
     pub(crate) shutdown: CancellationToken,
+    /// 任务索引常驻字节估算（快照序列化大小之和），用于回收上限。
+    task_bytes: Arc<std::sync::Mutex<usize>>,
     ui: Arc<RwLock<rpi_core::config::UiConfig>>,
     /// 动态工作区注册表（仅默认工作区持有；嵌套前缀为 None）。
     pub(crate) hub: Option<Arc<crate::hub::HubState>>,
@@ -38,7 +40,13 @@ struct TaskEntry {
     cancel: CancellationToken,
     abort: Option<tokio::task::AbortHandle>,
     snapshot: TaskSnapshot,
+    /// 快照序列化字节数（完成时计入）；运行中为 0。
+    bytes: usize,
 }
+
+/// 任务索引常驻字节预算：超过后按完成顺序回收快照，保证长时间运行的
+/// 常驻内存有上界（运行中任务不回收，结果主体仍在 session/trace 持久层）。
+const TASK_INDEX_BYTE_CAP: usize = 32 * 1024 * 1024;
 
 impl AppState {
     pub(crate) fn new(runtime: Arc<AgentRuntime>) -> Self {
@@ -48,6 +56,7 @@ impl AppState {
             runtime,
             tasks: Arc::new(RwLock::new(BTreeMap::new())),
             shutdown: CancellationToken::new(),
+            task_bytes: Arc::new(std::sync::Mutex::new(0)),
             hub: None,
             terms,
             roles: crate::roles::ModelRoles::detached(),
@@ -62,6 +71,54 @@ impl AppState {
         let mut state = Self::new(runtime);
         state.roles = roles;
         state
+    }
+
+    /// 替换关停令牌：动态工作区以根令牌的 child_token 派生，随根一起取消。
+    pub(crate) fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = shutdown;
+        self
+    }
+
+    fn task_bytes_total(&self) -> usize {
+        *self
+            .task_bytes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set_task_bytes_total(&self, value: usize) {
+        *self
+            .task_bytes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = value;
+    }
+
+    /// 超出字节预算时回收已完成任务的快照（BTreeMap 键序≈随机但保证有界；
+    /// 运行中任务不受影响）。不持有写锁跨 await 等待，避免阻塞提交路径。
+    async fn enforce_task_budget(&self) {
+        loop {
+            if self.task_bytes_total() <= TASK_INDEX_BYTE_CAP {
+                return;
+            }
+            let victim = {
+                let tasks = self.tasks.read().await;
+                tasks
+                    .values()
+                    .find(|task| task.snapshot.status != "running" && task.bytes > 0)
+                    .map(|task| task.snapshot.task_id.clone())
+            };
+            let Some(victim) = victim else { return };
+            let removed = self.tasks.write().await.remove(&victim);
+            if let Some(task) = removed {
+                let total = self.task_bytes_total();
+                self.set_task_bytes_total(total.saturating_sub(task.bytes));
+                tracing::info!(
+                    task_id = %victim,
+                    bytes = task.bytes,
+                    "任务索引超出字节预算，回收已完成快照"
+                );
+            }
+        }
     }
 
     async fn stop(&self) {
@@ -589,9 +646,11 @@ pub async fn serve(
         listener.local_addr()?
     );
     let app = AppState::with_roles(runtime.clone(), roles);
-    // 动态工作区注册表：恢复上次保存的条目并挂到默认 AppState 上。
+    // 动态工作区注册表：恢复上次保存的条目并挂到默认 AppState 上；
+    // 每个动态工作区的取消令牌由根令牌派生，根 stop() 时一并取消。
     let hub = crate::hub::HubState::new(runtime.config.data_dir.join("workspaces.json"));
-    hub.load_saved(runtime.config.clone()).await;
+    hub.load_saved(runtime.config.clone(), app.shutdown.clone())
+        .await;
     let mut app_state = app.clone();
     app_state.hub = Some(Arc::new(hub.clone()));
     let default_terms = app_state.terms.clone();
@@ -961,6 +1020,8 @@ async fn run_task(
         // Completed submissions are a bounded in-memory index. Durable results remain in sessions/traces.
         if tasks.len() >= 1024 {
             tasks.retain(|_, task| task.snapshot.status == "running");
+            // 回收完成项后重置字节估算（保留项均为运行中，尚未计入字节）。
+            app.set_task_bytes_total(tasks.values().map(|task| task.bytes).sum());
         }
         tasks.insert(
             task_id.clone(),
@@ -975,6 +1036,7 @@ async fn run_task(
                     progress: None,
                     error_details: None,
                 },
+                bytes: 0,
             },
         );
     }
@@ -1021,7 +1083,9 @@ async fn run_task(
             task.snapshot.result = result;
             task.snapshot.error = error;
             task.snapshot.error_details = error_details;
+            task.bytes = serde_json::to_vec(&task.snapshot).map_or(0, |bytes| bytes.len());
         }
+        task_state.enforce_task_budget().await;
     });
     if let Some(task) = app.tasks.write().await.get_mut(&task_id) {
         task.abort = Some(spawned.abort_handle());
@@ -1648,7 +1712,12 @@ mod tests {
         assert!(target.is_dir());
     }
 
-    async fn hub_fixture() -> (Router, tempfile::TempDir, Arc<crate::hub::HubState>) {
+    async fn hub_fixture() -> (
+        Router,
+        tempfile::TempDir,
+        Arc<crate::hub::HubState>,
+        AppState,
+    ) {
         let dir = tempfile::tempdir().unwrap();
         let config = RuntimeConfig {
             workspace: dir.path().to_path_buf(),
@@ -1662,15 +1731,15 @@ mod tests {
         ));
         let mut app_state = AppState::new(runtime.clone());
         app_state.hub = Some(hub.clone());
-        let (router, _) = attach_workspaces(runtime, router_with_state(app_state))
+        let (router, _) = attach_workspaces(runtime, router_with_state(app_state.clone()))
             .await
             .unwrap();
-        (router, dir, hub)
+        (router, dir, hub, app_state)
     }
 
     #[tokio::test]
     async fn dynamic_workspaces_dispatch_isolate_and_remove() {
-        let (router, dir, _hub) = hub_fixture().await;
+        let (router, dir, _hub, _state) = hub_fixture().await;
         std::fs::create_dir_all(dir.path().join("target-ws")).unwrap();
         let payload = json!({ "path": dir.path().join("target-ws").to_string_lossy() });
         let response = router
@@ -1775,7 +1844,7 @@ mod tests {
 
     #[tokio::test]
     async fn dynamic_workspace_create_rejects_missing_path() {
-        let (router, _dir, _hub) = hub_fixture().await;
+        let (router, _dir, _hub, _state) = hub_fixture().await;
         let response = router
             .oneshot(
                 Request::builder()
@@ -2891,5 +2960,136 @@ mod tests {
         }
         assert!(received.contains("event: progress"), "{received}");
         assert!(received.contains(task_id), "{received}");
+    }
+
+    /// 回归：连续创建动态工作区时必须持久化注册表全集，
+    /// 不得只写最新条目覆盖先前记录（旧实现重启后丢失除最后一个外的全部）。
+    #[tokio::test]
+    async fn dynamic_workspace_create_persists_full_registry() {
+        let (router, dir, _hub, _state) = hub_fixture().await;
+        for name in ["target-a", "target-b"] {
+            std::fs::create_dir_all(dir.path().join(name)).unwrap();
+            let payload = json!({ "path": dir.path().join(name).to_string_lossy() });
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/workspaces")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED, "create {name}");
+        }
+        let bytes = tokio::fs::read(dir.path().join("data/workspaces.json"))
+            .await
+            .unwrap();
+        let records: Vec<Value> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            records.len(),
+            2,
+            "注册表必须包含全部动态工作区：{:?}",
+            records.iter().map(|r| r["id"].clone()).collect::<Vec<_>>()
+        );
+    }
+
+    /// 回归：任务索引按字节预算回收已完成快照，长驻内存有上界。
+    #[tokio::test]
+    async fn task_index_byte_budget_evicts_completed_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let state = AppState::new(AgentRuntime::new(config).await.unwrap());
+        let mut total = 0usize;
+        for i in 0..200 {
+            let snapshot = TaskSnapshot {
+                task_id: format!("task-{i:03}"),
+                status: "completed".into(),
+                result: Some(json!({"blob": "x".repeat(256 * 1024)})),
+                error: None,
+                progress: None,
+                error_details: None,
+            };
+            let bytes = serde_json::to_vec(&snapshot).unwrap().len();
+            total += bytes;
+            state.tasks.write().await.insert(
+                snapshot.task_id.clone(),
+                TaskEntry {
+                    cancel: CancellationToken::new(),
+                    abort: None,
+                    snapshot,
+                    bytes,
+                },
+            );
+        }
+        state.set_task_bytes_total(total);
+        assert!(state.task_bytes_total() > TASK_INDEX_BYTE_CAP);
+        state.enforce_task_budget().await;
+        assert!(
+            state.task_bytes_total() <= TASK_INDEX_BYTE_CAP,
+            "回收后必须落入预算内"
+        );
+        let tasks = state.tasks.read().await;
+        assert!(
+            tasks.len() < 200,
+            "预算回收必须移除部分已完成快照（剩 {}）",
+            tasks.len()
+        );
+        assert!(
+            tasks.values().all(|task| task.bytes > 0),
+            "保留条目应为已计入预算的完成项"
+        );
+    }
+
+    /// 回归：根服务 stop() 必须级联取消动态工作区的 SSE（子取消令牌），
+    /// 否则 graceful shutdown 会等待活动流而无法收尾。
+    #[tokio::test]
+    async fn root_shutdown_cancels_dynamic_workspace_streams() {
+        let (router, dir, _hub, state) = hub_fixture().await;
+        std::fs::create_dir_all(dir.path().join("target-ws")).unwrap();
+        let payload = json!({ "path": dir.path().join("target-ws").to_string_lossy() });
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap())
+                .unwrap();
+        let id = body["id"].as_str().unwrap().to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/w/{id}/api/events/stream"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut data = response.into_body().into_data_stream();
+        state.stop().await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), data.next())
+                .await
+                .unwrap()
+                .is_none(),
+            "动态工作区 SSE 必须随根关停结束"
+        );
     }
 }

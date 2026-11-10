@@ -412,6 +412,13 @@ fn within_workspace(workspace: &Path, requested: &str) -> Result<PathBuf> {
         if !canonical_parent.starts_with(&root) {
             bail!("parent escapes workspace");
         }
+        // 悬空符号链接 exists()==false 会漏到本分支，但写入仍会跟随链接；
+        // 目标本身是符号链接时一律拒绝。
+        if let Ok(meta) = std::fs::symlink_metadata(&candidate)
+            && meta.file_type().is_symlink()
+        {
+            bail!("symlink paths are not allowed");
+        }
         Ok(candidate)
     }
 }
@@ -1745,6 +1752,26 @@ impl Object for GrepTool {
 mod tests {
     use super::*;
     use tokio_util::sync::CancellationToken;
+
+    /// 回归：悬空符号链接的 exists()==false 会漏进"新建文件"分支，
+    /// 写入会跟随链接逃逸 workspace；必须显式拒绝（unix 才能稳定建链）。
+    #[cfg(unix)]
+    #[test]
+    fn within_workspace_rejects_dangling_symlink_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        std::fs::create_dir_all(&root).unwrap();
+        // 悬空链接：目标不存在。
+        std::os::unix::fs::symlink(dir.path().join("outside-missing"), root.join("dang.txt"))
+            .unwrap();
+        assert!(within_workspace(&root, "dang.txt").is_err());
+        // 既有外部文件链接：exists() 为 true 走 canonicalize 分支同样拒绝。
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "sentinel").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link.txt")).unwrap();
+        assert!(within_workspace(&root, "link.txt").is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "sentinel");
+    }
 
     #[tokio::test]
     async fn http_allowlist_permits_plain_http_host() {

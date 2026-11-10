@@ -1,12 +1,18 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateRange(300, 400)][int]$Port = 374,
-    [string]$BinaryPath = ""
+    [string]$BinaryPath = "",
+    # 报告默认拒绝覆盖已有验证证据；显式 -Force 才允许重写。
+    [switch]$Force
 )
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $BinaryPath) { $BinaryPath = Join-Path $repoRoot "target\release\rpi.exe" }
 $BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
+$reportPath = Join-Path $repoRoot "reports\release-web-smoke.json"
+if ((Test-Path -LiteralPath $reportPath -PathType Leaf) -and -not $Force) {
+    throw "Report already exists: $reportPath. Pass -Force to overwrite existing evidence."
+}
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $smokeRoot = Join-Path $tempParent ("rpi-web-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $smokeRoot | Out-Null
@@ -87,8 +93,9 @@ function Invoke-SmokeTask($request) {
 try {
     Start-SmokeService
     $html = Invoke-WebRequest $baseUrl -UseBasicParsing
-    if ($html.StatusCode -ne 200 -or $html.Content -notmatch 'app.js') { throw "Bundled GUI missing" }
-    foreach ($asset in @("style.css", "app.js")) {
+    if ($html.StatusCode -ne 200 -or $html.Content -notmatch '/js/main\.js') { throw "Bundled GUI missing" }
+    # 当前入口为 ESM 拆分模块（/js/main.js + /app.css + /ui/*.css）。
+    foreach ($asset in @("app.css", "ui/tokens.css", "js/main.js")) {
         $response = Invoke-WebRequest "$baseUrl/$asset" -UseBasicParsing
         if ($response.StatusCode -ne 200) { throw "Bundled asset missing: $asset" }
     }
@@ -108,7 +115,13 @@ try {
     if (@($events | Where-Object kind -eq "tool.result").Count -ne 1) { throw "Tool trace missing" }
     $objects = @(Invoke-SmokeJson "$baseUrl/api/objects")
     $skills = @(Invoke-SmokeJson "$baseUrl/api/skills")
-    if ($objects.Count -ne 10 -or $skills.Count -ne 0 -or @($objects | Where-Object id -like "session:*").Count -ne 1) { throw "Object/Skill list projection mismatch" }
+    # 对象注册表随内置工具集演进（当前 18 项），断言核心投影而非固定计数。
+    $objectIds = @($objects | ForEach-Object { $_.id })
+    $modelCount = @($objectIds | Where-Object { $_.StartsWith("model:") }).Count
+    $sessionCount = @($objects | Where-Object { $_.id.StartsWith("session:") }).Count
+    $hasRuntime = $objectIds.Contains("runtime")
+    $hasReadFile = $objectIds.Contains("tool:read_file")
+    if ($skills.Count -ne 0 -or $sessionCount -ne 1 -or $modelCount -lt 1 -or -not $hasRuntime -or -not $hasReadFile) { throw "Object/Skill list projection mismatch" }
     $beforeRestart = $events[-1].sequence
     Stop-SmokeService
     Start-SmokeService

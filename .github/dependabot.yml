@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # CI 第三方 Action 的 SHA 固定升级通道：每周检查并开 PR。
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BinaryPath = "",
     [string]$OutputPath = "",
@@ -6,10 +6,16 @@ param(
     [ValidateRange(1, 10000)][int]$Samples = 20,
     [ValidateRange(1, 600)][int]$TimeoutSeconds = 30,
     [string]$Prompt = "benchmark a deterministic simulated agent run",
-    [switch]$BufferedLogs
+    [switch]$BufferedLogs,
+    # 报告默认拒绝覆盖已有验证证据；显式 -Force 才允许重写。
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+# 子进程 stdout 解码：Windows PowerShell 5.1 默认用 OEM 代码页，中文输出会
+# 变 mojibake 导致 JSON 解析失败；切到 UTF-8（pwsh 7 默认已 UTF-8，无害）。
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+$OutputEncoding = [Text.UTF8Encoding]::new($false)
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if ([string]::IsNullOrWhiteSpace($BinaryPath)) { $BinaryPath = Join-Path $repoRoot "target\release\rpi.exe" }
 if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
@@ -18,6 +24,9 @@ if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
 $BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $repoRoot "reports\benchmark-runtime.json" }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
+if ((Test-Path -LiteralPath $OutputPath -PathType Leaf) -and -not $Force) {
+    throw "Report already exists: $OutputPath. Pass -Force to overwrite existing evidence."
+}
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -153,7 +162,7 @@ tier = 'balanced'
             status = if ($parsed) { [string]$parsed.status } else { "unparseable" }
             model_id = if ($parsed) { [string]$parsed.model_id } else { "" }
             trace_id = if ($parsed) { [string]$parsed.trace_id } else { "" }
-            simulation_label_present = $null -ne $parsed -and ([string]$parsed.output).Contains("[DEMO simulation")
+            simulation_label_present = $null -ne $parsed -and ([string]$parsed.output).Contains("DEMO simulation")
             stdout = $stdout.Trim()
             stderr = $stderr.Trim()
         }
@@ -182,6 +191,8 @@ finally {
     $cpu = try { Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors } catch { "unavailable" }
     $computer = try { Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory } catch { "unavailable" }
     $os = try { Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture } catch { [Environment]::OSVersion.VersionString }
+    $dirtyStatus = Get-ToolOutput "git" @("-C", $repoRoot, "status", "--porcelain")
+    $dirtyCount = @($dirtyStatus -split "\r?\n" | Where-Object { $_.Trim() }).Count
     $report = [ordered]@{
         schema = "rpi.runtime-benchmark.v1"
         generated_at_utc = [DateTime]::UtcNow.ToString("o")
@@ -191,6 +202,7 @@ finally {
         binary_sha256 = (Get-FileHash -LiteralPath $BinaryPath -Algorithm SHA256).Hash
         binary_bytes = (Get-Item -LiteralPath $BinaryPath).Length
         workspace_commit = Get-ToolOutput "git" @("-C", $repoRoot, "rev-parse", "HEAD")
+        workspace_dirty_files = $dirtyCount
         upstream_pi_commit = Get-ToolOutput "git" @("-C", (Join-Path $repoRoot "upstream\pi"), "rev-parse", "HEAD")
         rustc = Get-ToolOutput "rustc" @("--version")
         node = Get-ToolOutput "node" @("--version")

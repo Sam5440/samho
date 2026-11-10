@@ -16,6 +16,7 @@
   <div class="workbench">
     <header class="topbar">
       <a class="brand" href="/" aria-label="rπ 工作台首页"><span class="brand-mark">rπ</span><span class="brand-word">智能体工作台</span></a>
+      <button id="toggle-sidebar" class="sidebar-toggle" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="会话导航" aria-controls="sidebar" aria-expanded="false" title="会话导航">☰</button>
       <div class="topbar-workspace"><span class="dot" aria-hidden="true"></span><span id="workspace-name">正在连接工作区…</span></div>
       <nav class="topbar-nav" aria-label="项目资料"><a href="/docs">中文文档</a><a href="/plan">确认计划</a></nav>
       <span class="topbar-spacer"></span>
@@ -25,6 +26,7 @@
       <button id="open-settings" data-component="button" data-variant="ghost" data-size="icon-sm" aria-label="界面设置" title="界面设置">⚙</button>
     </header>
 
+    <div id="sidebar-overlay" class="sidebar-overlay" hidden></div>
     <aside class="sidebar" id="sidebar" aria-label="会话导航"></aside>
 
     <main class="main-panel">

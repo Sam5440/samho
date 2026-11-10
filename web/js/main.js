@@ -48,6 +48,14 @@ let streamSources = [];
 let currentWorkspaceId = workspaceIdFromLocation();
 // 每个工作区记住上次打开的会话，切回时恢复。
 const wsSessionMemory = new Map([['default', null]]);
+// 轨迹分页加载去重：traceId -> { cursor, done, promise }。同一 trace 的
+// 进行中加载复用同一 Promise，已完成且非补洞时不再重复分页。
+const trajectoryLoads = new Map();
+// 工作区加载代际：响应返回时代际不匹配即整组丢弃，防止快速切换时旧
+// 工作区数据覆盖当前视图。
+let workspaceGen = 0;
+// 任务提交锁：/api/run 返回前不允许第二次提交（避免启动多个未追踪任务）。
+let submitting = false;
 
 /* ---------- 主题 ---------- */
 function resolveTheme(theme) {
@@ -110,6 +118,8 @@ async function loadSession(id, { force = false } = {}) {
     state.transcripts.set(key, array(detail?.messages, 'messages'));
     const latestTrace = await latestSessionTrace(id);
     state.traceId = latestTrace?.trace_id || '';
+    // 会话视图整体替换轨迹面板，历史加载器随之失效。
+    trajectoryLoads.clear();
     trajectory.setEvents(collectTraceEvents(latestTrace?.trace_id || ''));
     syncTimeline();
   } catch (error) {
@@ -132,23 +142,36 @@ function collectTraceEvents(traceId) {
     .sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
 }
 
-async function loadTrajectory(traceId) {
+async function loadTrajectory(traceId, { resume = false } = {}) {
   if (!traceId) { trajectory.setEvents([]); return; }
-  const collected = [];
-  let cursor = 0;
-  try {
-    for (let i = 0; i < 60; i++) {
-      const page = await api(`/api/events/page?trace_id=${encodeURIComponent(traceId)}&after=${cursor}&limit=500`);
-      const events = array(page, 'events');
-      for (const event of events) rememberEvent(event);
-      collected.push(...events);
-      if (!page.has_more) break;
-      cursor = Number(page.next_cursor ?? cursor);
-    }
-  } catch (error) {
-    toast(`轨迹加载失败：${error.message}`, 'error');
+  let entry = trajectoryLoads.get(traceId);
+  if (!entry) {
+    entry = { cursor: 0, done: false, promise: null };
+    trajectoryLoads.set(traceId, entry);
   }
-  if (traceId === state.traceId) trajectory.setEvents(collected);
+  // 进行中的同一 trace 加载复用；已完成且非补洞时直接跳过——进度帧不再
+  // 反复从游标 0 全量分页。
+  if (entry.promise) return entry.promise;
+  if (entry.done && !resume) return;
+  const run = (async () => {
+    let cursor = resume ? entry.cursor : 0;
+    try {
+      for (let i = 0; i < 60; i++) {
+        const page = await api(`/api/events/page?trace_id=${encodeURIComponent(traceId)}&after=${cursor}&limit=500`);
+        const events = array(page, 'events');
+        if (traceId === state.traceId && events.length) trajectory.appendEvents(events);
+        if (!page.has_more) { entry.cursor = cursor; entry.done = true; break; }
+        cursor = Number(page.next_cursor ?? cursor);
+        entry.cursor = cursor;
+      }
+    } catch (error) {
+      toast(`轨迹加载失败：${error.message}`, 'error');
+    }
+  })();
+  entry.promise = run;
+  try { await run; } finally {
+    if (trajectoryLoads.get(traceId)?.promise === run) entry.promise = null;
+  }
 }
 
 function rememberEvent(event) {
@@ -237,7 +260,11 @@ function applyProgress(progress) {
   if (progress.trace_id && !state.traceId) {
     state.traceId = String(progress.trace_id);
   }
-  if (progress.trace_id) loadTrajectory(String(progress.trace_id));
+  if (progress.trace_id) {
+    const traceKey = String(progress.trace_id);
+    // 首次发现该 trace 才启动加载；后续帧交给 SSE 增量与完成态补洞。
+    if (!trajectoryLoads.has(traceKey)) loadTrajectory(traceKey);
+  }
   scheduleProgressRender();
 }
 
@@ -266,12 +293,19 @@ function updateTaskStateLabel() {
     // HaloProgress：第 N 轮 / max_turns（服务端 limits 未返回时不定态）。
     setHalo(halo, Number(progress?.turn || 0), Number(state.limits?.max_turns) || 0);
     halo.hidden = false;
+    // 状态变化只播报阶段摘要（sr-only status 节点），不再整段重播流式正文。
+    if (phase !== lastAnnouncedPhase) {
+      lastAnnouncedPhase = phase;
+      timeline.announce(`任务状态：${phase}`);
+    }
   } else {
+    lastAnnouncedPhase = '';
     label.textContent = '就绪';
     label.style.color = '';
     halo.hidden = true;
   }
 }
+let lastAnnouncedPhase = '';
 
 async function refreshSessions() {
   try {
@@ -301,14 +335,20 @@ async function finishTask(response, task) {
       await reloadSessionMessages(String(resultSession));
     }
   }
+  const reason = response?.error || result?.error || '未知错误';
   if (status === 'cancelled') toast('任务已取消');
   if (status === 'failed') {
-    const reason = response?.error || result?.error || '未知错误';
     // 失败时服务端通常没有 assistant 消息，客户端补一条注记让失败原因留在时间线里。
     messagesOf(task.viewKey).push({ role: 'error', content: `任务失败：${reason}`, timestamp_ms: Date.now() });
     toast(reason, 'error');
   }
-  if (result?.trace_id) { state.traceId = String(result.trace_id); loadTrajectory(String(result.trace_id)); }
+  timeline.announce(status === 'cancelled' ? '任务已取消'
+    : status === 'failed' ? `任务失败：${reason}` : '任务已完成');
+  if (result?.trace_id) {
+    state.traceId = String(result.trace_id);
+    // 完成态补洞：从已取游标之后拉剩余事件（含 SSE 可能缺失的部分）。
+    loadTrajectory(String(result.trace_id), { resume: true });
+  }
   syncTimeline();
   updateTaskStateLabel();
   updateHeader();
@@ -344,6 +384,19 @@ async function pollTask(task) {
 }
 
 async function submitPrompt(prompt) {
+  if (submitting) {
+    toast('上一个任务仍在提交，请稍候', 'error');
+    return null;
+  }
+  submitting = true;
+  try {
+    return await submitPromptInner(prompt);
+  } finally {
+    submitting = false;
+  }
+}
+
+async function submitPromptInner(prompt) {
   const draftKeyValue = state.currentSessionId ? viewKeyOf(state.currentSessionId) : draftKey();
   state.draftKeyValue = draftKeyValue;
   messagesOf(draftKeyValue).push({ role: 'user', content: prompt, timestamp_ms: Date.now() });
@@ -376,6 +429,7 @@ async function submitPrompt(prompt) {
     };
     state.task = task;
     state.traceId = '';
+    trajectoryLoads.clear();
     liveTools.tools.clear();
     trajectory.setEvents([]);
     composer.setRunning(true);
@@ -423,8 +477,11 @@ function attachStreams() {
           liveTools.apply(event);
           scheduleProgressRender();
         }
-        if (state.traceId && event.trace_id === state.traceId) {
-          trajectory.setEvents(collectTraceEvents(state.traceId));
+        // 只把影响投影的模型事件增量送入轨迹面板（工具状态由 live 工具区
+        // 呈现）；面板内部按调用卡追加/末卡刷新，不再整表重建。
+        if (state.traceId && event.trace_id === state.traceId
+          && ['model.start', 'model.response', 'model.error'].includes(event.kind)) {
+          trajectory.appendEvents([event]);
         }
       },
       onGap: () => { if (state.traceId) loadTrajectory(state.traceId); },
@@ -440,9 +497,12 @@ function attachStreams() {
 
 /* ---------- 工作区切换 ---------- */
 async function loadWorkspaceData() {
+  const gen = ++workspaceGen;
   const names = ['状态', '模型', '会话', '项目', '对象', '技能', '界面'];
   const results = await Promise.allSettled(
     ['/api/state', '/api/models', '/api/sessions', '/api/projects', '/api/objects', '/api/skills', '/api/ui'].map((path) => api(path)));
+  // 响应返回时代际已推进：这是被更新的切换取代的旧工作区数据，整组丢弃。
+  if (gen !== workspaceGen) return;
   const value = (i) => results[i].status === 'fulfilled' ? results[i].value : null;
 
   const runtime = value(0);
@@ -489,6 +549,7 @@ async function switchWorkspace(id, { push = true } = {}) {
   state.currentSessionId = wsSessionMemory.get(target) ?? null;
   state.draftKeyValue = draftKey();
   state.traceId = '';
+  trajectoryLoads.clear();
   state.events.clear();
   state.transcripts.clear();
   state.runningSessions.clear();
@@ -497,6 +558,9 @@ async function switchWorkspace(id, { push = true } = {}) {
   timeline.reset();
   updateTaskStateLabel();
   await loadWorkspaceData();
+  // 本次切换已被更新的切换取代（代际/当前 id 不再匹配）：跳过收尾，
+  // 避免旧工作区的会话指针与 SSE 覆盖新视图。
+  if (currentWorkspaceId !== target) return;
   sidebar.setCurrent(state.currentSessionId);
   sidebar.reloadWorkspaces(target);
   attachStreams();
@@ -575,12 +639,22 @@ function openModelQuickSelect() {
   });
 }
 
+/* ---------- 移动端侧栏抽屉 ---------- */
+function setSidebarOpen(open) {
+  document.body.classList.toggle('sidebar-open', open);
+  const toggle = byId('toggle-sidebar');
+  if (toggle) toggle.setAttribute('aria-expanded', String(open));
+  const overlay = byId('sidebar-overlay');
+  if (overlay) overlay.hidden = !open;
+}
+
 /* ---------- 装配 ---------- */
 function newSession() {
   state.draftKeyValue = draftKey();
   state.currentSessionId = null;
   wsSessionMemory.set(currentWorkspaceId, null);
   state.traceId = '';
+  trajectoryLoads.clear();
   state.requestCounter++;
   sidebar.setCurrent(null);
   timeline.reset();
@@ -616,9 +690,13 @@ async function bootstrap() {
 
   sidebar = createWorkbenchSidebar({
     container: byId('sidebar'),
-    onSelect: (id, { forceNew } = {}) => (id ? loadSession(id) : newSession()),
-    onNewSession: newSession,
-    onSwitchWorkspace: (id) => switchWorkspace(id),
+    // 移动端抽屉：选择会话/新建/切换工作区后收起抽屉。
+    onSelect: (id, opts) => {
+      setSidebarOpen(false);
+      return id ? loadSession(id) : newSession();
+    },
+    onNewSession: () => { setSidebarOpen(false); newSession(); },
+    onSwitchWorkspace: (id) => { setSidebarOpen(false); switchWorkspace(id); },
   });
   composer = createComposer({
     container: byId('composer-host'),
@@ -660,6 +738,16 @@ async function bootstrap() {
       .catch(() => { /* 主题切换本地即时生效，持久化失败不阻断 */ });
   });
   byId('open-settings').addEventListener('click', settingsDialog);
+  // 移动端抽屉：顶栏开关 + 遮罩点击 + Escape 关闭。
+  byId('toggle-sidebar')?.addEventListener('click', () => {
+    setSidebarOpen(!document.body.classList.contains('sidebar-open'));
+  });
+  byId('sidebar-overlay')?.addEventListener('click', () => setSidebarOpen(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+      setSidebarOpen(false);
+    }
+  });
 
   document.addEventListener('keydown', (event) => {
     if (matchesShortcut(event, state.ui.new_session_key)) { event.preventDefault(); newSession(); }

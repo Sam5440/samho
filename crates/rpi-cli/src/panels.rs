@@ -14,12 +14,21 @@ use serde::Deserialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
 
 const FILE_READ_CAP: u64 = 1024 * 1024;
 const DIFF_CAP: usize = 512 * 1024;
 const PROXY_CAP: usize = 4 * 1024 * 1024;
+/// /api/file/raw 的字节上限：完整读入前截断，避免大文件拖垮内存。
+const FILE_RAW_CAP: u64 = 8 * 1024 * 1024;
+/// 目录列举条目上限（面板列表 + 设备浏览共用语义）。
+const DIR_LIST_CAP: usize = 2000;
+/// Git 子进程：总超时 + 管道采集上限（DIFF_CAP 仍在下游做展示层截断）。
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+const GIT_STDOUT_CAP: u64 = 2 * 1024 * 1024;
+const GIT_STDERR_CAP: u64 = 64 * 1024;
 
 fn bad(msg: impl Into<String>) -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, msg.into())
@@ -68,6 +77,14 @@ pub(crate) async fn confined(
     if canonical != root_canonical && !canonical.starts_with(&root_canonical) {
         return Err(bad("路径越界：越出 workspace"));
     }
+    // 新建路径（写入/改名目标）：目标本身若是符号链接（含悬空），写入会跟随
+    // 链接落盘；此处显式拒绝，配合父目录 canonicalize 复核覆盖两条逃逸路径。
+    if !must_exist
+        && let Ok(meta) = tokio::fs::symlink_metadata(&target).await
+        && meta.is_symlink()
+    {
+        return Err(bad("目标路径是符号链接，已拒绝"));
+    }
     Ok(canonical)
 }
 
@@ -96,6 +113,7 @@ pub(crate) async fn fs_list(
     let root = state.runtime.config.workspace.clone();
     let dir = confined(&root, &q.path, true).await?;
     let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut truncated = false;
     let mut rd = tokio::fs::read_dir(&dir)
         .await
         .map_err(|e| bad(format!("无法读取目录：{e}")))?;
@@ -107,6 +125,10 @@ pub(crate) async fn fs_list(
         let name = entry.file_name().to_string_lossy().into_owned();
         if name == ".rpi" {
             continue; // 运行时数据目录不进面板
+        }
+        if entries.len() >= DIR_LIST_CAP {
+            truncated = true;
+            break;
         }
         let meta = entry.metadata().await.ok();
         let kind = match &meta {
@@ -127,7 +149,9 @@ pub(crate) async fn fs_list(
         ka.cmp(&kb)
             .then(a["name"].as_str().cmp(&b["name"].as_str()))
     });
-    Ok(Json(json!({ "path": q.path, "entries": entries })))
+    Ok(Json(
+        json!({ "path": q.path, "entries": entries, "truncated": truncated }),
+    ))
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -147,9 +171,16 @@ pub(crate) async fn file_read(
     if meta.is_dir() {
         return Err(bad("目标是目录，请用 /api/fs 列举"));
     }
-    let bytes = tokio::fs::read(&path)
+    // 流式读取并截断：先 take(cap+1) 再入内存，避免大文件整读放大峰值。
+    let mut bytes = Vec::new();
+    tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| bad(format!("无法读取文件：{e}")))?
+        .take(FILE_READ_CAP + 1)
+        .read_to_end(&mut bytes)
         .await
         .map_err(|e| bad(format!("无法读取文件：{e}")))?;
+    let total_size = meta.len();
     let truncated = bytes.len() as u64 > FILE_READ_CAP;
     let view = if truncated {
         &bytes[..FILE_READ_CAP as usize]
@@ -159,29 +190,37 @@ pub(crate) async fn file_read(
     if looks_binary(view) {
         return Ok(Json(json!({
             "path": q.path, "binary": true, "truncated": false,
-            "size": bytes.len(), "content": serde_json::Value::Null,
+            "size": total_size, "content": serde_json::Value::Null,
         })));
     }
     Ok(Json(json!({
         "path": q.path,
         "binary": false,
         "truncated": truncated,
-        "size": bytes.len(),
+        "size": total_size,
         "modified": modified_ms(&meta),
         "content": String::from_utf8_lossy(view),
     })))
 }
 
-/// GET /api/file/raw —— 原始字节（图片预览 / 下载）。
+/// GET /api/file/raw —— 原始字节（图片预览 / 下载），带字节上限。
 pub(crate) async fn file_raw(
     State(state): State<AppState>,
     Query(q): Query<PathQuery>,
 ) -> Result<Response, ApiError> {
     let root = state.runtime.config.workspace.clone();
     let path = confined(&root, &q.path, true).await?;
-    let bytes = tokio::fs::read(&path)
+    let mut bytes = Vec::new();
+    tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| bad(format!("无法读取文件：{e}")))?
+        .take(FILE_RAW_CAP + 1)
+        .read_to_end(&mut bytes)
         .await
         .map_err(|e| bad(format!("无法读取文件：{e}")))?;
+    if bytes.len() as u64 > FILE_RAW_CAP {
+        return Err(bad("文件超过下载上限（>8MiB），请在文件面板外打开"));
+    }
     let mime = match path
         .extension()
         .and_then(|e| e.to_str())
@@ -298,6 +337,7 @@ pub(crate) async fn browse_list(Query(q): Query<PathQuery>) -> ApiResult<serde_j
     }
     let dir = std::path::PathBuf::from(&raw);
     let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut truncated = false;
     let mut rd = tokio::fs::read_dir(&dir)
         .await
         .map_err(|e| bad(format!("无法读取目录 {raw}：{e}")))?;
@@ -306,6 +346,10 @@ pub(crate) async fn browse_list(Query(q): Query<PathQuery>) -> ApiResult<serde_j
         .await
         .map_err(|e| bad(format!("无法读取目录 {raw}：{e}")))?
     {
+        if entries.len() >= DIR_LIST_CAP {
+            truncated = true;
+            break;
+        }
         if !entry
             .file_type()
             .await
@@ -327,7 +371,7 @@ pub(crate) async fn browse_list(Query(q): Query<PathQuery>) -> ApiResult<serde_j
         .parent()
         .map(|parent| parent.to_string_lossy().into_owned());
     Ok(Json(
-        json!({ "path": raw, "parent": parent, "entries": entries }),
+        json!({ "path": raw, "parent": parent, "entries": entries, "truncated": truncated }),
     ))
 }
 
@@ -395,21 +439,100 @@ pub(crate) async fn fs_delete(
 // ---------- Git 审查 ----------
 
 async fn run_git(root: &Path, args: &[&str]) -> Result<String, ApiError> {
-    let out = tokio::process::Command::new("git")
+    // 总超时 + 管道采集上限：卡死的子进程或超大输出不再无界占用请求与内存。
+    let mut child = tokio::process::Command::new("git")
         .args(args)
         .current_dir(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| {
             ApiError(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("无法启动 git：{e}"),
             )
         })?;
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = child.stdout.take().ok_or_else(|| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "git stdout 不可用".into(),
+        )
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "git stderr 不可用".into(),
+        )
+    })?;
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout
+            .take(GIT_STDOUT_CAP + 1)
+            .read_to_end(&mut buf)
+            .await
+            .map(|_| buf)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stderr
+            .take(GIT_STDERR_CAP + 1)
+            .read_to_end(&mut buf)
+            .await
+            .map(|_| buf)
+    });
+    let status = match tokio::time::timeout(GIT_TIMEOUT, child.wait()).await {
+        Ok(status) => status.map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git 进程异常：{e}"),
+            )
+        })?,
+        Err(_) => {
+            let _ = child.kill().await;
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(bad(format!(
+                "git {} 超时（>{:?}）",
+                args.first().unwrap_or(&""),
+                GIT_TIMEOUT
+            )));
+        }
+    };
+    let out = stdout_task
+        .await
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git 采集失败：{e}"),
+            )
+        })?
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git 读取失败：{e}"),
+            )
+        })?;
+    let err_bytes = stderr_task
+        .await
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git 采集失败：{e}"),
+            )
+        })?
+        .map_err(|e| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git 读取失败：{e}"),
+            )
+        })?;
+    if out.len() as u64 > GIT_STDOUT_CAP {
+        return Err(bad("git 输出超过上限（>2MiB），请在终端面板查看"));
+    }
+    let stdout = String::from_utf8_lossy(&out).into_owned();
+    if !status.success() {
+        let err = String::from_utf8_lossy(&err_bytes).trim().to_string();
         return Err(bad(if err.is_empty() {
             format!("git {} 失败", args.first().unwrap_or(&""))
         } else {
@@ -794,24 +917,32 @@ pub(crate) async fn proxy(
                 format!("代理初始化失败：{e}"),
             )
         })?;
-    let resp = client
+    let mut resp = client
         .get(&url)
         .send()
         .await
         .map_err(|e| bad(format!("代理请求失败：{e}")))?;
     let status = resp.status();
+    // Content-Length 可先判，缺失时靠流式累计上限兜底；两者都在读取整页前拦截。
+    if resp.content_length().unwrap_or(0) > PROXY_CAP as u64 {
+        return Err(bad("页面过大（>4MiB），请在系统浏览器打开"));
+    }
     let content_type = resp
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let bytes = resp
-        .bytes()
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
-        .map_err(|e| bad(format!("读取响应失败：{e}")))?;
-    if bytes.len() > PROXY_CAP {
-        return Err(bad("页面过大（>4MiB），请在系统浏览器打开"));
+        .map_err(|e| bad(format!("读取响应失败：{e}")))?
+    {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > PROXY_CAP {
+            return Err(bad("页面过大（>4MiB），请在系统浏览器打开"));
+        }
     }
     if !content_type.contains("text/html") {
         // 非 HTML 直接透传字节（css/图片等子资源由 <base> 让浏览器直连源站）
@@ -926,5 +1057,29 @@ mod tests {
         .unwrap();
         assert!(log.contains("\u{1f}init"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 回归：写入路径（must_exist=false）的目标是符号链接（含悬空）时
+    /// 必须拒绝，写入不得跟随链接逃逸 workspace（unix 才能稳定建链）。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn confined_rejects_symlink_targets_for_new_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = dir.path().join("outside.txt");
+        std::fs::write(&outside, "sentinel").unwrap();
+        // 指向外部既有文件的链接。
+        std::os::unix::fs::symlink(&outside, root.join("escape.txt")).unwrap();
+        assert!(confined(&root, "escape.txt", false).await.is_err());
+        // 悬空链接。
+        std::os::unix::fs::symlink(dir.path().join("missing-outside"), root.join("dang.txt"))
+            .unwrap();
+        assert!(confined(&root, "dang.txt", false).await.is_err());
+        // 哨兵未被改写。
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "sentinel");
+        // 普通新路径不受影响。
+        let fresh = confined(&root, "fresh/new.txt", false).await.unwrap();
+        assert!(fresh.starts_with(std::path::Path::new(&root)));
     }
 }

@@ -206,6 +206,10 @@ pub struct RoutingRule {
     pub keywords: Vec<String>,
     pub complexity: u8,
 }
+/// 工具授权开关。安全边界说明：`shell` 不是沙箱——命令以服务进程的
+/// OS 用户权限执行，可访问 workspace 之外的系统资源；`write`/`edit` 仅限制
+/// 在 workspace 内。服务只绑定 loopback 且没有身份认证，请在可信本机环境
+/// 启用 shell，处理不可信内容（外部仓库/网页/MCP 数据）时建议显式关闭。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ToolPolicy {

@@ -55,11 +55,19 @@ impl ProjectStore {
     pub async fn open(path: impl AsRef<Path>, durable: bool) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut projects = BTreeMap::new();
-        if let Ok(bytes) = tokio::fs::read(&path).await {
-            let list: Vec<Project> =
-                serde_json::from_slice(&bytes).context("projects.json 损坏")?;
-            for project in list {
-                projects.insert(project.id.clone(), project);
+        match tokio::fs::read(&path).await {
+            Ok(bytes) => {
+                let list: Vec<Project> =
+                    serde_json::from_slice(&bytes).context("projects.json 损坏")?;
+                for project in list {
+                    projects.insert(project.id.clone(), project);
+                }
+            }
+            // 首次启动没有清单文件属正常；其余 I/O 错误（权限/损坏）显式报错，
+            // 不静默当作“没有项目”。
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!("read {}", path.display())));
             }
         }
         Ok(Self {
@@ -90,8 +98,12 @@ impl ProjectStore {
             color,
             created_at: now_ms(),
         };
-        guard.insert(project.id.clone(), project.clone());
-        self.persist(&guard).await?;
+        // 先持久化候选快照，成功后再替换内存：写盘失败时 API 报错且内存不变，
+        // 不再出现“API 失败但内存已变更”的漂移。
+        let mut candidate = guard.clone();
+        candidate.insert(project.id.clone(), project.clone());
+        self.persist(&candidate).await?;
+        *guard = candidate;
         Ok(project)
     }
 
@@ -103,26 +115,31 @@ impl ProjectStore {
         color: Option<Option<String>>,
     ) -> Result<Project> {
         let mut guard = self.projects.lock().await;
+        let mut candidate = guard.clone();
         if let Some(name) = name {
             let name = validate_name(&name)?;
-            if guard.values().any(|p| p.id != id && p.name == name) {
+            if candidate.values().any(|p| p.id != id && p.name == name) {
                 bail!("同名项目已存在");
             }
-            guard.get_mut(id).context("项目不存在")?.name = name;
+            candidate.get_mut(id).context("项目不存在")?.name = name;
         }
         if let Some(color) = color {
             let color = validate_color(color)?;
-            guard.get_mut(id).context("项目不存在")?.color = color;
+            candidate.get_mut(id).context("项目不存在")?.color = color;
         }
-        let project = guard.get(id).context("项目不存在")?.clone();
-        self.persist(&guard).await?;
+        let project = candidate.get(id).context("项目不存在")?.clone();
+        self.persist(&candidate).await?;
+        *guard = candidate;
         Ok(project)
     }
 
     pub async fn delete(&self, id: &str) -> Result<Project> {
         let mut guard = self.projects.lock().await;
-        let project = guard.remove(id).context("项目不存在")?;
-        self.persist(&guard).await?;
+        let project = guard.get(id).context("项目不存在")?.clone();
+        let mut candidate = guard.clone();
+        candidate.remove(id);
+        self.persist(&candidate).await?;
+        *guard = candidate;
         Ok(project)
     }
 
@@ -188,5 +205,40 @@ mod tests {
         reopened.delete(&project.id).await.unwrap();
         assert!(reopened.list().await.is_empty());
         assert!(reopened.delete(&project.id).await.is_err());
+    }
+
+    /// 回归：持久化失败时内存不得已变更（旧实现先改内存后写盘，
+    /// 写盘失败返回错误但内存漂移）。
+    #[tokio::test]
+    async fn persist_failure_keeps_memory_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.json");
+        std::fs::write(&path, "[]").unwrap();
+        let store = ProjectStore::open(&path, false).await.unwrap();
+
+        // 把目标路径替换为目录：temp+rename 发布必然失败。
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(store.create("演示".into(), None).await.is_err());
+        assert!(
+            store.list().await.is_empty(),
+            "写盘失败后内存不得出现新项目"
+        );
+
+        // 恢复路径后仍可正常创建（内存未被污染，也未出现半提交状态）。
+        std::fs::remove_dir(&path).unwrap();
+        let created = store.create("演示".into(), None).await.unwrap();
+        assert_eq!(store.list().await.len(), 1);
+        assert_eq!(created.name, "演示");
+    }
+
+    /// 启动读取：仅把“文件不存在”当作空清单；其他 I/O 错误显式报错。
+    #[tokio::test]
+    async fn open_surfaces_io_errors_other_than_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // 目标是目录：读取产生非 NotFound 错误，open 必须失败而不是静默清空。
+        let path = dir.path().join("projects.json");
+        std::fs::create_dir(&path).unwrap();
+        assert!(ProjectStore::open(&path, false).await.is_err());
     }
 }

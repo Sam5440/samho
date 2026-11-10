@@ -351,6 +351,28 @@ struct Record {
 fn digest(delta: &Delta) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(delta)?)))
 }
+/// 由 committed 映射求级联删除集合（目标 + 全部 fork 后代）。
+fn cascade_doomed(
+    committed: &BTreeMap<String, Session>,
+    id: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut doomed: std::collections::BTreeSet<String> = std::iter::once(id.to_string()).collect();
+    loop {
+        let mut grew = false;
+        for s in committed.values() {
+            if let Some(parent) = &s.parent_id
+                && doomed.contains(parent)
+                && doomed.insert(s.id.clone())
+            {
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    doomed
+}
 struct JournalState {
     committed: BTreeMap<String, Session>,
     sequence: u64,
@@ -503,23 +525,31 @@ impl SessionStore {
     pub async fn commit(&self, s: &Session) -> Result<()> {
         let s: Session = serde_json::from_value(self.redactor.value(serde_json::to_value(s)?))?;
         let mut j = self.journal.lock().await;
-        let base = if let Some(old) = j.committed.get(&s.id) {
-            old.messages.clone()
-        } else if let Some(id) = &s.parent_id {
-            let parent = j.committed.get(id).context("uncommitted fork parent")?;
-            let cutoff = s.fork_cutoff.context("missing fork cutoff")?;
-            if cutoff > parent.messages.len() {
-                bail!("invalid fork cutoff");
-            }
-            parent.messages[..cutoff].to_vec()
-        } else {
-            Vec::new()
+        // 前缀比较借用 committed 中的历史，不再整体克隆 base（长会话每次
+        // checkpoint 的复制成本随历史线性增长，这里去掉一次全量 clone）。
+        let prefix = match j.committed.get(&s.id) {
+            Some(old) => old
+                .messages
+                .iter()
+                .zip(&s.messages)
+                .take_while(|(a, b)| a == b)
+                .count(),
+            None => match &s.parent_id {
+                Some(id) => {
+                    let parent = j.committed.get(id).context("uncommitted fork parent")?;
+                    let cutoff = s.fork_cutoff.context("missing fork cutoff")?;
+                    if cutoff > parent.messages.len() {
+                        bail!("invalid fork cutoff");
+                    }
+                    parent.messages[..cutoff]
+                        .iter()
+                        .zip(&s.messages)
+                        .take_while(|(a, b)| a == b)
+                        .count()
+                }
+                None => 0,
+            },
         };
-        let prefix = base
-            .iter()
-            .zip(&s.messages)
-            .take_while(|(a, b)| a == b)
-            .count();
         let payload = Delta {
             schema_version: SESSION_SCHEMA_VERSION,
             sequence: j.sequence + 1,
@@ -632,36 +662,64 @@ impl SessionStore {
     /// Removes a session and every fork descendant. The journal is rewritten
     /// as one full-snapshot delta per surviving session, so the checksum chain
     /// stays verifiable across restarts.
+    ///
+    /// 锁顺序与 checkpoint（session → journal）一致：sessions → doomed 会话
+    /// 句柄 → journal。旧实现先持 journal 再锁会话句柄，与并发的会话
+    /// checkpoint 形成“任务持 session 等 journal / 删除持 journal 等 session”
+    /// 的环，可能在级联删除与提交并发时死锁。
     pub async fn delete_cascade(&self, id: &str) -> Result<Vec<String>> {
         let mut sessions = self.sessions.lock().await;
         if !sessions.contains_key(id) {
             bail!("unknown session {id}");
         }
+        // 句柄 Arc 存放在外层：锁守卫的生命周期必须覆盖到函数结束，
+        // 且先声明保证 Drop 顺序在 handles 之后。
+        let mut doomed_arcs: Vec<Arc<Mutex<Session>>> = Vec::new();
+        let handles = loop {
+            let doomed = {
+                let j = self.journal.lock().await;
+                cascade_doomed(&j.committed, id)
+            };
+            doomed_arcs.clear();
+            let mut complete = true;
+            for did in &doomed {
+                match sessions.get(did).cloned() {
+                    // 克隆 Arc 再加锁：句柄的生命周期独立于 sessions 借用，
+                    // 后续才能从 map 中移除条目。
+                    Some(handle) => doomed_arcs.push(handle),
+                    // journal 中出现了尚未入 map 的条目（fork 提交进行中）：
+                    // 重读 doomed 集合后重试。
+                    None => {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if !complete {
+                continue;
+            }
+            let mut locked = Vec::with_capacity(doomed_arcs.len());
+            for handle in &doomed_arcs {
+                locked.push(handle.lock().await);
+            }
+            // 持有全部 doomed 句柄期间，fork（需锁父会话）无法推进，集合稳定；
+            // 再校验一次 journal 一致后落锁重写。
+            let stable = {
+                let j = self.journal.lock().await;
+                cascade_doomed(&j.committed, id) == doomed
+            };
+            if stable {
+                break locked;
+            }
+        };
+        for handle in &handles {
+            if handle.status == "running" {
+                bail!("cannot delete a running session");
+            }
+        }
+        let doomed: std::collections::BTreeSet<String> =
+            handles.iter().map(|s| s.id.clone()).collect();
         let mut j = self.journal.lock().await;
-        let mut doomed: std::collections::BTreeSet<String> =
-            std::iter::once(id.to_string()).collect();
-        loop {
-            let mut grew = false;
-            for s in j.committed.values() {
-                if let Some(parent) = &s.parent_id
-                    && doomed.contains(parent)
-                    && doomed.insert(s.id.clone())
-                {
-                    grew = true;
-                }
-            }
-            if !grew {
-                break;
-            }
-        }
-        for did in &doomed {
-            if let Some(handle) = sessions.get(did) {
-                let s = handle.lock().await;
-                if s.status == "running" {
-                    bail!("cannot delete a running session");
-                }
-            }
-        }
         let mut records = Vec::new();
         let mut sequence = 0u64;
         let mut checksum = String::new();
@@ -842,5 +900,43 @@ mod tests {
         assert!(store.delete_cascade(&s.id).await.is_err());
         assert!(store.delete_cascade("missing").await.is_err());
         assert!(store.get(&s.id).await.unwrap().is_some());
+    }
+
+    /// 回归：级联删除与并发 checkpoint 提交不得死锁（旧实现的锁顺序反转
+    /// 会在“删除持 journal 等会话 / 提交持会话等 journal”处挂死）。
+    /// 并发提交可能在删除后复活 journal 条目（commit 的既有语义），
+    /// 本测试只断言删除在有界时间内完成且幸存会话无损。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn delete_cascade_concurrent_with_commits_does_not_deadlock() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path()).await;
+        let victim = seed_session(&store, "待删除").await;
+        let survivor = seed_session(&store, "幸存者").await;
+
+        let commit_store = store.clone();
+        let commit_victim = victim.clone();
+        let commit_survivor = survivor.clone();
+        let committer = tokio::spawn(async move {
+            for _ in 0..200 {
+                let mut s = commit_victim.clone();
+                s.messages.push(json!({"role":"user","content":"并发提交"}));
+                let _ = commit_store.commit(&s).await;
+                let _ = commit_store.commit(&commit_survivor).await;
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let delete_store = store.clone();
+        let target = victim.id.clone();
+        let deleted = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            delete_store.delete_cascade(&target),
+        )
+        .await
+        .expect("delete_cascade 不得死锁（10s 超时）");
+        committer.abort();
+        let _ = committer.await;
+        deleted.expect("并发提交场景下删除目标会话应当成功");
+        assert!(store.get(&survivor.id).await.unwrap().is_some());
     }
 }

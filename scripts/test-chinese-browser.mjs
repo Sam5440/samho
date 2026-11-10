@@ -75,7 +75,7 @@ let cdp;
 let downloadedPath;
 try {
   // include_str! 资源必须来自最终文件，避免旧二进制掩盖界面/文档修改。
-  for (const [route, source] of [['/', 'index.html'], ['/index.html', 'index.html'], ['/docs', 'docs.html'], ['/docs.html', 'docs.html'], ['/plan', 'plan.html'], ['/plan.html', 'plan.html'], ['/plan.js', 'plan.js'], ['/plan.css', 'plan.css'], ['/docs.js', 'docs.js'], ['/docs.css', 'docs.css'], ['/documents-data.js', 'documents-data.js'], ['/app.js', 'app.js'], ['/chinese.css', 'chinese.css']]) {
+  for (const [route, source] of [['/', 'index.html'], ['/index.html', 'index.html'], ['/docs', 'docs.html'], ['/docs.html', 'docs.html'], ['/plan', 'plan.html'], ['/plan.html', 'plan.html'], ['/plan.js', 'plan.js'], ['/plan.css', 'plan.css'], ['/docs.js', 'docs.js'], ['/docs.css', 'docs.css'], ['/documents-data.js', 'documents-data.js'], ['/js/main.js', 'js/main.js'], ['/app.css', 'app.css'], ['/ui/tokens.css', 'ui/tokens.css']]) {
     const response = await fetch(base + route);
     assert.equal(response.status, 200, route);
     assert.match(response.headers.get('content-type'), /charset=utf-8/i);

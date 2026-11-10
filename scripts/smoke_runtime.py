@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description="RPi 跨平台模拟服务冒烟")
     parser.add_argument("--binary", default="target/release/rpi")
     parser.add_argument("--report", default="reports/ci-smoke.json")
+    parser.add_argument("--force", action="store_true", help="允许覆盖已存在的报告文件")
     parser.add_argument("--port", type=int, default=373)
     args = parser.parse_args()
     if not 300 <= args.port <= 400:
@@ -86,7 +87,8 @@ def main():
                         raise TimeoutError("模拟任务超时")
                     time.sleep(0.05)
                 result = task["result"]
-                assert "[DEMO simulation]" in result["output"]
+                # 只检查结构化标识，不锚定完整本地化前缀（Demo 文案随版本演进）。
+                assert "DEMO simulation" in result["output"]
                 assert result["session_id"]
                 checks.append("任务提交、真实轮询与明确模拟标记")
                 session = request(base, "/api/sessions/" + result["session_id"])
@@ -109,6 +111,8 @@ def main():
               "binary": str(binary), "checks": checks, "elapsed_seconds": round(time.monotonic() - started, 3),
               "provider": "explicit demo simulation", "status": "passed"}
     destination = Path(args.report)
+    if destination.exists() and not args.force:
+        raise SystemExit(f"报告已存在：{destination}（使用 --force 覆盖）")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": "passed", "checks": len(checks)}, ensure_ascii=False))

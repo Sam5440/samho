@@ -9,6 +9,8 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
   let running = false;
   let sendingControl = false;
   let cancelRequested = false;
+  // 提交进行中标记：覆盖 /api/run 尚未返回、running 未置位的窗口期。
+  let submitInFlight = false;
 
   const textarea = h('textarea', {
     'data-component': 'textarea',
@@ -114,13 +116,23 @@ export function createComposer({ container, onSubmit, onControl, onCancel }) {
       return;
     }
     const value = textarea.value;
+    // 提交锁：/api/run 返回前（running 尚未置位）忽略再次提交，
+    // 避免慢响应期间连发启动多个未受追踪的任务。
+    if (submitInFlight) return;
+    submitInFlight = true;
     textarea.value = '';
     autoResize();
     update();
-    const failure = await onSubmit(value);
-    if (failure) {
-      textarea.value = value;
-      autoResize();
+    try {
+      const failure = await onSubmit(value);
+      // 失败回填只在输入框仍为空时进行，不覆盖用户新输入。
+      if (failure && !textarea.value.trim()) {
+        textarea.value = value;
+        autoResize();
+        update();
+      }
+    } finally {
+      submitInFlight = false;
       update();
     }
   }

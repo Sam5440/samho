@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 /// 动态工作区数量上限：每个工作区一个独立运行时（含连接池/MCP/技能扫描），需要限界。
@@ -98,7 +99,13 @@ impl HubState {
     }
 
     /// 启动时恢复上次保存的动态工作区；条目损坏或运行时创建失败则告警并剔除。
-    pub(crate) async fn load_saved(&self, base_config: rpi_core::RuntimeConfig) {
+    /// `root_shutdown` 用于派生每个工作区 AppState 的子取消令牌：根服务优雅
+    /// 退出时随之取消动态工作区的 SSE/任务，不再让 graceful shutdown 无界等待。
+    pub(crate) async fn load_saved(
+        &self,
+        base_config: rpi_core::RuntimeConfig,
+        root_shutdown: CancellationToken,
+    ) {
         let Ok(bytes) = tokio::fs::read(self.registry_path.as_path()).await else {
             return;
         };
@@ -120,7 +127,8 @@ impl HubState {
             config.data_dir = record.data_dir.clone();
             match crate::roles::build_runtime(config).await {
                 Ok((runtime, roles)) => {
-                    let app_state = AppState::with_roles(runtime.clone(), roles);
+                    let app_state = AppState::with_roles(runtime.clone(), roles)
+                        .with_shutdown(root_shutdown.child_token());
                     let router = crate::server::router_with_state(app_state.clone());
                     self.dynamic.write().await.insert(
                         record.id.clone(),
@@ -260,7 +268,8 @@ pub(crate) async fn workspace_create(
     let (runtime, roles) = crate::roles::build_runtime(config)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("工作区初始化失败：{e}")))?;
-    let app_state = AppState::with_roles(runtime.clone(), roles);
+    let app_state =
+        AppState::with_roles(runtime.clone(), roles).with_shutdown(app.shutdown.child_token());
     let router = crate::server::router_with_state(app_state.clone());
     let mut dynamic = hub.dynamic.write().await;
     if dynamic.len() >= MAX_DYNAMIC_WORKSPACES {
@@ -280,14 +289,11 @@ pub(crate) async fn workspace_create(
             name: name.clone(),
         },
     );
+    // 持久化当前注册表全集（旧实现只写本次新条目，会覆盖先前工作区的
+    // 注册记录，重启后丢失）。
+    let records = hub_record_list(&dynamic);
     drop(dynamic);
-    let record = WorkspaceRecord {
-        id: id.clone(),
-        name: name.clone(),
-        path: path.clone(),
-        data_dir,
-    };
-    if let Err(error) = hub.persist(std::slice::from_ref(&record)).await {
+    if let Err(error) = hub.persist(&records).await {
         // 持久化失败不回滚内存态，但要让调用方知道重启会丢失。
         tracing::warn!(error = %error.1, "workspaces.json 持久化失败");
     }
@@ -374,6 +380,8 @@ pub(crate) async fn workspace_remove(
     if let Err(error) = hub.persist(&records).await {
         tracing::warn!(error = %error.1, "workspaces.json 持久化失败");
     }
+    // 先关闭该工作区的终端会话（否则 PTY 子进程可能残留），再关停运行时。
+    entry.terms.shutdown_all().await;
     entry.runtime.shutdown().await?;
     Ok(Json(json!({"removed": id})))
 }

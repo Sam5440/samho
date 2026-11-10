@@ -63,7 +63,9 @@ let liveWrap = null;
 let liveArticle = null;
 
 function liveTurn(live, reuse = liveWrap) {
-  const wrap = reuse || h('section', { class: 'live-turn', 'aria-live': 'polite' });
+  // 正文不进入 aria-live 区域：流式整段累计文本逐帧替换会让屏幕阅读器
+  // 反复重播全文；阶段摘要改由 sr-only status 节点（announce）播报。
+  const wrap = reuse || h('section', { class: 'live-turn' });
   wrap.replaceChildren();
   if (live.turn) wrap.append(h('div', { class: 'turn-divider' }, h('span', { class: 'turn-divider-label' }, `第 ${live.turn} 轮${live.attempt > 1 ? ` · 重试 ${live.attempt}` : ''}`)));
   if (live.reasoning && live.reasoning.trim()) {
@@ -120,6 +122,22 @@ export function createTimeline(container) {
   let pinned = true;
   const rendered = new Map(); // key -> { sig, el }
 
+  // 屏幕阅读器状态节点：只播报阶段摘要，不承载流式正文。
+  let statusNode = null;
+  let lastAnnounceText = '';
+  let lastAnnounceAt = 0;
+  const announce = (text) => {
+    const now = Date.now();
+    if (text === lastAnnounceText && now - lastAnnounceAt < 1500) return;
+    if (!statusNode) {
+      statusNode = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+      container.append(statusNode);
+    }
+    lastAnnounceText = text;
+    lastAnnounceAt = now;
+    statusNode.replaceChildren(text);
+  };
+
   const isPinned = () => container.scrollTop + container.clientHeight >= container.scrollHeight - NEAR_BOTTOM;
   container.addEventListener('scroll', () => {
     pinned = isPinned();
@@ -174,6 +192,7 @@ export function createTimeline(container) {
 
   return {
     sync,
+    announce,
     reset() {
       rendered.clear();
       inner.replaceChildren();

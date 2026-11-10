@@ -45,7 +45,7 @@ cargo run -p rpi -- --config rpi.toml serve
 - JSONL trace、序列号、trace/session/span/parent 关联、路由理由、工具参数与结果摘要、usage、耗时、脱敏、导出和 SSE。
 - MCP stdio/Streamable HTTP；工具、资源、模板、prompts、分页、超时、取消和子进程回收，基于 `rmcp 3.5.1`。
 - `SKILL.md` frontmatter 校验、确定性发现与冲突诊断、按需正文加载及显式用户调用。
-- 工作区文件工具；写入和 shell 可选开启。
+- 工作区文件工具（read/write/edit/list_files/glob/grep/webfetch/todo）。**write 与 shell 默认开启**：shell 不是沙箱，命令以服务进程的 OS 用户权限执行，可访问 workspace 之外的系统资源；处理不可信内容时请在 `[tools]` 中显式关闭（见下文安全边界）。
 - Web GUI 与 TUI 共用 Rust 服务；任务提交/取消、会话、模型、Object、Skill、MCP 状态和 trace 查询。
 
 Runtime 已将 Session/Task 纳入 Object 生命周期，并提供 scope、middleware、lease 和 generation 热替换。远程 Facet、生产级跨进程隔离和跨平台运维仍按状态文档列为后续验收项。自定义范围和限制见 [docs/customization.md](docs/customization.md)。
@@ -56,10 +56,18 @@ Runtime 已将 Session/Task 纳入 Object 生命周期，并提供 scope、middl
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-node --check web/app.js
+node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
 ```
 
-Rust 当前 workspace 共 **93 项测试**：CLI 16、core 单元 4、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 11、runtime semantics 9、Skill policy 5、storage lifecycle 9。测试使用本地 fixture，无需供应商凭证。
+Rust 当前 workspace 共 **141 项测试**（CLI 41、core 单元 22、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
+
+本机验收脚本默认拒绝覆盖既有报告，重跑需显式 `-Force`（PowerShell）或 `--force`（Python）：
+
+```powershell
+powershell -NoProfile -File scripts/smoke-web.ps1 -Force
+powershell -NoProfile -File scripts/benchmark-runtime.ps1 -Force
+python scripts/smoke_runtime.py --force
+```
 
 浏览器验收已验证自动分级、同会话续接、手动 reasoning tier、固定 model、重启恢复与 trace/Object 展示；桌面及 560×900 窄屏无水平溢出，最终启动请求全部 200，控制台无 error/warning。详情及截图见 [reports/gui-validation/browser-validation.md](reports/gui-validation/browser-validation.md)。浏览器此轮未配置实际 MCP server/Skill，也未调用真实语言模型；对应协议和加载逻辑由 Rust 集成测试覆盖。
 
@@ -96,3 +104,10 @@ Rust 当前 workspace 共 **93 项测试**：CLI 16、core 单元 4、Agent 6、
 当前已实现 Provider streaming、上下文投影与 lineage、会话 fork/steering、失败重试与降级路由、SQLite/file journal、事件索引分页、MCP optional fixture、OAuth PKCE、Skill 权限策略、Facet 握手和 generation lease。完整 MCP 官方 conformance、真实供应商质量、跨平台实机、24 小时 soak 与 Pi/Rust 同机性能对照仍未验收；这些限制不能由本地模拟器结果推断。
 
 `log_content = false` 仅省略 trace 正文；会话恢复仍保存经脱敏的完整消息。trace replay 当前为事件查看/导出，不会重执行外部副作用。真实模型质量、官方 MCP conformance、跨平台 TUI 与 24 小时稳定性测试尚未完成。性能目标必须以同机、同输入、同语义的 Pi 对照实验校准。
+
+## 安全边界
+
+- `serve` 只绑定 loopback 并拒绝跨源请求，但**没有身份认证**，也不是 OS 沙箱；不要把端口暴露到不可信网络，也不要经端口转发共享给他人。
+- 默认工具策略包含 `shell` 与 `write`：Agent 可以以当前用户权限执行任意命令、写 workspace 内文件。处理不可信内容（外部仓库、网页、MCP 数据）时建议在 `runtime.toml` 的 `[tools]` 中关闭 `shell`。
+- 文件面板与内置文件工具都会拒绝符号链接目标与越界路径；Git 面板操作有超时与输出上限。
+- 性能基线与不同版本二进制体积不可直接互比；比较需同 commit、同构建条件、同工作负载。
