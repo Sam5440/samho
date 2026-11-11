@@ -25,16 +25,16 @@
 `plan.html` 已包含以下根元素，宿主页面如需嵌入，只需保留这个属性并加载脚本：
 
 ```html
-<div data-rpi-plan-generator>
+<div data-samho-plan-generator>
   <!-- 与 web/plan.html 相同的表单标记。脚本会生成 #plan-groups。 -->
 </div>
 <script src="plan.js" defer></script>
 ```
 
-脚本在 `DOMContentLoaded` 时自动查找 `[data-rpi-plan-generator]`。需要显式挂载时：
+脚本在 `DOMContentLoaded` 时自动查找 `[data-samho-plan-generator]`。需要显式挂载时：
 
 ```js
-const instance = window.RpiPlan.mount(document.querySelector('[data-rpi-plan-generator]'));
+const instance = window.SamhoPlan.mount(document.querySelector('[data-samho-plan-generator]'));
 const state = instance.collect();
 const text = instance.generate();
 ```
@@ -42,21 +42,21 @@ const text = instance.generate();
 以下函数不依赖 DOM，适合 Node `vm` 或浏览器契约测试：
 
 ```js
-window.RpiPlan.generatePlanText(data, { date: '2026-10-07' });
-window.RpiPlan.validatePlan(data);
-window.RpiPlan.computeDependencies(data);
-window.RpiPlan.filename(data, { date: '2026-10-07' });
+window.SamhoPlan.generatePlanText(data, { date: '2026-10-07' });
+window.SamhoPlan.validatePlan(data);
+window.SamhoPlan.computeDependencies(data);
+window.SamhoPlan.filename(data, { date: '2026-10-07' });
 ```
 
 `generatePlanText` 的第二个参数可以固定 `date`，使测试输出确定。未传日期时使用本机
-日期。下载文件名固定为 `rpi-确认执行计划-YYYY-MM-DD.txt`，内容使用 UTF-8 BOM，兼容
+日期。下载文件名固定为 `samho-确认执行计划-YYYY-MM-DD.txt`，内容使用 UTF-8 BOM，兼容
 Windows 记事本。
 
 ## 数据形状
 
 ```js
 {
-  projectName: 'RPi · 可扩展 Rust Agent 框架',
+  projectName: 'Samho · 可扩展 Rust Agent 框架',
   target: '项目目标（必填）',
   priority: '功能完整性与 Pi 任务执行语义',
   boundary: '执行边界',

@@ -1,8 +1,8 @@
 /*
- * RPi 确认计划编排器
+ * Samho 确认计划编排器
  *
  * 这是一个只负责“编排和导出确认计划”的离线模块。它不会调用 /api/run，
- * 也不会启动任务。页面或宿主工作台可以通过 window.RpiPlan.mount(root)
+ * 也不会启动任务。页面或宿主工作台可以通过 window.SamhoPlan.mount(root)
  * 挂载它，纯文本生成与依赖校验函数也会暴露给测试脚本。
  */
 (function (global) {
@@ -21,7 +21,7 @@
       description: '决定这份计划要覆盖的主要交付阶段。',
       items: [
         { id: 'upstream-analysis', label: '上游 Pi / DSH / ZCode 源码分析', status: 'done', detail: '固定提交、功能矩阵、任务循环与性能边界' },
-        { id: 'rust-workspace', label: 'Rust workspace 与项目骨架', status: 'done', detail: 'rpi-core、rpi-cli、配置与本地数据目录' },
+        { id: 'rust-workspace', label: 'Rust workspace 与项目骨架', status: 'done', detail: 'samho-core、samho-cli、配置与本地数据目录' },
         { id: 'object-lifecycle', label: 'Everything is Object 生命周期', status: 'done', detail: '依赖拓扑、激活回滚、逆序销毁、动态 Tool' },
         { id: 'agent-loop', label: 'Agent 任务循环与会话恢复', status: 'done', detail: '取消、并发限制、检查点、工具调用循环' },
         { id: 'provider-streaming', label: 'Provider 流式响应与结构化错误', status: 'planned', detail: '增量文本 / 工具调用、取消、背压和 typed error' },
@@ -257,14 +257,14 @@
       byGroup[entry.group.id].push(entry.item);
     });
     var lines = [];
-    lines.push('RPi Rust Agent 重写 · 确认执行计划');
+    lines.push('Samho Rust Agent 重写 · 确认执行计划');
     lines.push('='.repeat(44));
     lines.push('生成日期：' + date);
     lines.push('计划状态：待确认；本文件只描述执行计划，不会自动执行任务。');
-    lines.push('计划文件：rpi-确认执行计划-' + date + '.txt');
+    lines.push('计划文件：samho-确认执行计划-' + date + '.txt');
     lines.push('');
     lines.push('一、项目目标');
-    lines.push('项目名称：' + (String(data.projectName || '').trim() || 'RPi Rust Agent 重写')); 
+    lines.push('项目名称：' + (String(data.projectName || '').trim() || 'Samho Rust Agent 重写')); 
     lines.push('目标描述：' + (String(data.target || '').trim() || '未填写')); 
     lines.push('');
     lines.push('二、优先级与执行边界');
@@ -328,7 +328,7 @@
     lines.push('5. 每阶段更新中文状态矩阵与证据，未通过项说明原因、影响与后续措施。');
     lines.push('');
     lines.push('八、回传确认模板');
-    lines.push('我确认执行《RPi Rust Agent 重写 · 确认执行计划》（' + date + '）。');
+    lines.push('我确认执行《Samho Rust Agent 重写 · 确认执行计划》（' + date + '）。');
     lines.push('执行范围：' + (selected.length ? selected.map(function (entry) { return entry.item.label; }).join('、') : '未选择'));
     lines.push('最高优先级：' + (String(data.priority || '').trim() || '未选择')); 
     lines.push('补充说明：' + (String(data.notes || '').trim() || '无')); 
@@ -340,7 +340,7 @@
 
   function filename(data, options) {
     options = options || {};
-    return 'rpi-确认执行计划-' + today(options.date || data && data.date) + '.txt';
+    return 'samho-确认执行计划-' + today(options.date || data && data.date) + '.txt';
   }
 
   function byId(root, id) {
@@ -493,7 +493,7 @@
   }
 
   function mount(root, options) {
-    if (!root && typeof document !== 'undefined') root = document.querySelector('[data-rpi-plan-generator]');
+    if (!root && typeof document !== 'undefined') root = document.querySelector('[data-samho-plan-generator]');
     if (!root) return null;
     options = options || {};
     if (options.renderGroups !== false) renderGroups(root);
@@ -524,7 +524,7 @@
     return { update: function () { return update(root); }, collect: function () { return collect(root); }, generate: function () { return generatePlanText(collect(root)); } };
   }
 
-  global.RpiPlan = {
+  global.SamhoPlan = {
     mount: mount,
     collect: collect,
     generatePlanText: generatePlanText,
@@ -538,7 +538,7 @@
 
   if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', function () {
-      var root = document.querySelector('[data-rpi-plan-generator]');
+      var root = document.querySelector('[data-samho-plan-generator]');
       if (root) mount(root);
     });
   }

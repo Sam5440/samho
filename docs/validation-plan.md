@@ -6,9 +6,9 @@
 
 ## 本轮 Rust 增量实测记录（2026-10-22）
 
-以下结果只代表当前 `rpi` 原型，不能替代上游 Pi 或真实供应商的兼容性报告。当前 `cargo test --workspace` 通过 135 项：CLI 38、core 单元 19、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9。`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过。
+以下结果只代表当前 `samho` 原型，不能替代上游 Pi 或真实供应商的兼容性报告。当前 `cargo test --workspace` 通过 135 项：CLI 38、core 单元 19、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9。`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过。
 
-在 Windows PTY 上启动 `rpi serve` 后，`rpi tui` 连接同一个服务并提交翻译任务，任务完成且显示 `demo-fast` 与 `[DEMO simulation]` 标记；退出后终端恢复。该运行使用独立临时数据目录和回环地址，未发送付费模型请求。GUI 的静态检查确认脚本无 `innerHTML`/`eval`/内联事件，资源请求使用文本节点和同源 API。真实浏览器已完成自动路由、会话续接、reasoning tier、model pin、重启恢复与trace/Object检查；桌面和560×900窄屏均无水平溢出，末次10个启动请求全部200且console无error/warning。截图与报告已保存于 `reports/gui-validation/`；此fixture未配置实际MCP/Skill，浏览器慢任务取消竞态仍未验收。
+在 Windows PTY 上启动 `samho serve` 后，`samho tui` 连接同一个服务并提交翻译任务，任务完成且显示 `demo-fast` 与 `[DEMO simulation]` 标记；退出后终端恢复。该运行使用独立临时数据目录和回环地址，未发送付费模型请求。GUI 的静态检查确认脚本无 `innerHTML`/`eval`/内联事件，资源请求使用文本节点和同源 API。真实浏览器已完成自动路由、会话续接、reasoning tier、model pin、重启恢复与trace/Object检查；桌面和560×900窄屏均无水平溢出，末次10个启动请求全部200且console无error/warning。截图与报告已保存于 `reports/gui-validation/`；此fixture未配置实际MCP/Skill，浏览器慢任务取消竞态仍未验收。
 
 本轮新增流式 Provider、上下文 lineage、重试/预算、会话 fork/steering/follow-up、SQLite journal、轨迹索引分页、Skill 权限、MCP optional/OAuth、Remote Facet 和 Web API 行为测试。所有本地 HTTP fixture 与 OAuth 回调只使用 300–400 范围（Rust 分配器实际使用 301–399）；真实模型、完整 MCP conformance、macOS/Linux 实跑、24 小时 soak 和等价 Pi/Rust 相对性能仍未验收。持久事件查询已经提供游标分页，但大规模长时间并发写入仍需独立 soak。
 

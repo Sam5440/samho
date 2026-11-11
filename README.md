@@ -1,4 +1,4 @@
-# RPi
+# Samho
 
 Pi coding agent 的 Rust 重写工程。已下载并分析完整上游仓库，当前交付为可运行的增量重写版本：Rust 核心、共享本地服务、Ratatui TUI 和本地 Web GUI。未完成项仍按实现状态文档保留边界。
 
@@ -7,22 +7,22 @@ Pi coding agent 的 Rust 重写工程。已下载并分析完整上游仓库，�
 需要 Rust 1.88+；MCP stdio 集成测试还需要 Python 3。
 
 ```powershell
-cargo run -p rpi -- serve --bind 127.0.0.1:7432
-# 浏览器打开 http://127.0.0.1:7432
+cargo run -p samho -- serve --bind 0.0.0.0:7432
+# 本机打开 http://127.0.0.1:7432；局域网地址见启动日志与页面顶栏
 ```
 
 另开终端连接同一个服务：
 
 ```powershell
-cargo run -p rpi -- tui --url http://127.0.0.1:7432
+cargo run -p samho -- tui --url http://127.0.0.1:7432
 ```
 
 默认 Provider 是明确标注 `[DEMO simulation]` 的离线模拟器，不提供真实模型推理。以下命令可独立验证真实文件读取、会话持久化和调用轨迹：
 
 ```powershell
-cargo run -p rpi -- run "/demo read README.md" --complexity 2 --json
-cargo run -p rpi -- inspect
-cargo run -p rpi -- replay --export trace.jsonl
+cargo run -p samho -- run "/demo read README.md" --complexity 2 --json
+cargo run -p samho -- inspect
+cargo run -p samho -- replay --export trace.jsonl
 ```
 
 `run`、`inspect` 和 `replay` 会打开本地数据目录；服务运行时应使用 TUI/Web 访问同一运行时，或为独立 CLI 设置另一数据目录。文件锁会拒绝两个进程同时写同一目录。
@@ -30,11 +30,11 @@ cargo run -p rpi -- replay --export trace.jsonl
 生成可编辑的完整配置：
 
 ```powershell
-cargo run -p rpi -- config init rpi.toml
-cargo run -p rpi -- --config rpi.toml serve
+cargo run -p samho -- config init samho.toml
+cargo run -p samho -- --config samho.toml serve
 ```
 
-真实 Provider 示例见 [examples/rpi.chat.toml](examples/rpi.chat.toml)。填写端点、物理模型 ID、能力、费用与延迟后，通过指定环境变量读取 API key。所有模型配置均由使用者维护；分级标签和延迟提示不代表已测模型性能。
+真实 Provider 示例见 [examples/samho.chat.toml](examples/samho.chat.toml)。填写端点、物理模型 ID、能力、费用与延迟后，通过指定环境变量读取 API key。所有模型配置均由使用者维护；分级标签和延迟提示不代表已测模型性能。
 
 ## 已实现
 
@@ -80,7 +80,7 @@ python scripts/smoke_runtime.py --force
 - [中文确认计划说明](docs/中文确认计划说明.md)：网页 `/plan` 的勾选、导出、回传和执行规则。
 - [当前架构](docs/architecture.md)、[自定义配置](docs/customization.md)、[实现状态](docs/implementation-status.md)。
 
-打开本地服务后访问 `/docs` 阅读中文文档，访问 `/plan` 勾选下一阶段目标并下载 `rpi-确认执行计划-YYYY-MM-DD.txt`。网页只生成计划文本，不自动执行；将完整文本回传本对话后，才按确认范围开展实现。
+打开本地服务后访问 `/docs` 阅读中文文档，访问 `/plan` 勾选下一阶段目标并下载 `samho-确认执行计划-YYYY-MM-DD.txt`。网页只生成计划文本，不自动执行；将完整文本回传本对话后，才按确认范围开展实现。
 
 也可直接打开本地 [中文文档中心](web/docs.html) 与 [确认计划网页](web/plan.html)，无需先启动 Rust 服务。真正运行 Agent 任务仍需启动服务。
 
@@ -108,7 +108,7 @@ python scripts/smoke_runtime.py --force
 
 ## 安全边界
 
-- `serve` 只绑定 loopback 并拒绝跨源请求，但**没有身份认证**，也不是 OS 沙箱；不要把端口暴露到不可信网络，也不要经端口转发共享给他人。
+- `serve` 默认绑定 `0.0.0.0:7432` 并拒绝跨源请求，但**没有身份认证**，也不是 OS 沙箱；只应在可信局域网使用，可用 `--bind 127.0.0.1:7432` 收回本机。启动日志与页面顶栏会显示可用的局域网地址。
 - 默认工具策略包含 `shell` 与 `write`：Agent 可以以当前用户权限执行任意命令、写 workspace 内文件。处理不可信内容（外部仓库、网页、MCP 数据）时建议在 `runtime.toml` 的 `[tools]` 中关闭 `shell`。
 - 文件面板与内置文件工具都会拒绝符号链接目标与越界路径；Git 面板操作有超时与输出上限。
 - 性能基线与不同版本二进制体积不可直接互比；比较需同 commit、同构建条件、同工作负载。

@@ -523,7 +523,9 @@ async function loadWorkspaceData() {
   state.tiers = array(runtime?.tiers);
   state.workspace = typeof runtime?.workspace === 'string'
     ? runtime.workspace : runtime?.workspace?.path || '本地工作区';
-  const workspaceLabel = state.workspace.replace(/^\\\\\?\\/, '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || state.workspace;
+  const configuredName = typeof runtime?.display_name === 'string' ? runtime.display_name.trim() : '';
+  const workspaceLabel = configuredName
+    || state.workspace.replace(/^\\\\\?\\/, '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || state.workspace;
   byId('workspace-name').textContent = state.simulation ? `${workspaceLabel} · 模拟模式` : workspaceLabel;
   byId('workspace-name').title = `${workspaceLabel} · ${state.workspace}`;
   state.models = array(value(1), 'models').filter((m) => m && m.id);
@@ -679,6 +681,21 @@ function newSession({ projectId } = {}) {
   composer?.focus();
 }
 
+async function loadLanEndpoint() {
+  const info = await api('/api/network').catch(() => null);
+  const el = byId('lan-endpoint');
+  if (!el || !info || !Array.isArray(info.addresses) || !info.addresses.length) return;
+  const urls = info.addresses.map((ip) => `http://${ip}:${info.port}`);
+  el.textContent = '局域网 ' + urls[0].replace(/^http:\/\//, '');
+  el.title = '局域网访问地址（点击复制）：\n' + urls.join('\n');
+  el.addEventListener('click', () => {
+    const value = urls[0];
+    if (!navigator.clipboard?.writeText) { toast(value); return; }
+    navigator.clipboard.writeText(value).then(() => toast(`已复制 ${value}`)).catch(() => toast(value));
+  });
+  el.hidden = false;
+}
+
 async function bootstrap() {
   const devicePanels = {
     files: files = createFilesPanel({ container: byId('panel-files') }),
@@ -749,6 +766,7 @@ async function bootstrap() {
   dock.activate('trajectory');
   attachStreams();
   composer.focus();
+  loadLanEndpoint();
 
   byId('fork-session').addEventListener('click', async () => {
     if (!state.currentSessionId) return;

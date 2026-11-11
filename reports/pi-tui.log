@@ -246,9 +246,9 @@ ok 1 - CombinedAutocompleteProvider slash-command filter
           ---
           duration_ms: 20.0884
           type: 'test'
-          location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:428:3'
+          location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:428:3'
           failureType: 'testCodeFailure'
-          error: "EPERM: operation not permitted, symlink '..\\outside' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\rpi-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-gJ3W3t\\cwd\\symlinked_dir'"
+          error: "EPERM: operation not permitted, symlink '..\\outside' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-gJ3W3t\\cwd\\symlinked_dir'"
           code: 'EPERM'
           stack: |-
             symlinkSync (node:fs:1889:11)
@@ -263,9 +263,9 @@ ok 1 - CombinedAutocompleteProvider slash-command filter
           ---
           duration_ms: 15.6445
           type: 'test'
-          location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:450:3'
+          location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:450:3'
           failureType: 'testCodeFailure'
-          error: "EPERM: operation not permitted, symlink '..\\outside' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\rpi-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-U823gc\\cwd\\symlinked_dir'"
+          error: "EPERM: operation not permitted, symlink '..\\outside' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-U823gc\\cwd\\symlinked_dir'"
           code: 'EPERM'
           stack: |-
             symlinkSync (node:fs:1889:11)
@@ -280,9 +280,9 @@ ok 1 - CombinedAutocompleteProvider slash-command filter
           ---
           duration_ms: 13.6457
           type: 'test'
-          location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:466:3'
+          location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:466:3'
           failureType: 'testCodeFailure'
-          error: "EPERM: operation not permitted, symlink 'original.txt' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\rpi-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-57UYGj\\cwd\\link.txt'"
+          error: "EPERM: operation not permitted, symlink 'original.txt' -> 'C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56\\pi-autocomplete-root-57UYGj\\cwd\\link.txt'"
           code: 'EPERM'
           stack: |-
             symlinkSync (node:fs:1889:11)
@@ -315,7 +315,7 @@ ok 1 - CombinedAutocompleteProvider slash-command filter
       ---
       duration_ms: 23255.227
       type: 'suite'
-      location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:117:2'
+      location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:117:2'
       failureType: 'subtestsFailed'
       error: '3 subtests failed'
       code: 'ERR_TEST_FAILURE'
@@ -417,7 +417,7 @@ not ok 2 - CombinedAutocompleteProvider
   ---
   duration_ms: 23517.9436
   type: 'suite'
-  location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:57:1'
+  location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\autocomplete.test.ts:57:1'
   failureType: 'subtestsFailed'
   error: '1 subtest failed'
   code: 'ERR_TEST_FAILURE'
@@ -5901,7 +5901,7 @@ ok 43 - image cell sizing
       ---
       duration_ms: 1.6891
       type: 'test'
-      location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:778:2'
+      location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:778:2'
       failureType: 'testCodeFailure'
       error: |-
         Expected values to be strictly equal:
@@ -5932,7 +5932,7 @@ ok 43 - image cell sizing
       ---
       duration_ms: 0.5523
       type: 'test'
-      location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:789:2'
+      location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:789:2'
       failureType: 'testCodeFailure'
       error: |-
         Expected values to be strictly equal:
@@ -5974,7 +5974,7 @@ not ok 44 - imageFallback
   ---
   duration_ms: 2.8163
   type: 'suite'
-  location: 'D:\\ddcode\\rpi\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:777:1'
+  location: 'D:\\ddcode\\samho\\upstream\\pi\\packages\\tui\\test\\terminal-image.test.ts:777:1'
   failureType: 'subtestsFailed'
   error: '2 subtests failed'
   code: 'ERR_TEST_FAILURE'

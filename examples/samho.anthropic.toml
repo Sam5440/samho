@@ -1,0 +1,59 @@
+# Samho Anthropic 协议网关完整示例配置（canonical，2026-11-10）
+# 默认 API：http://127.0.0.1:3425 ｜ 模型 auto/glm-5.3-flash ｜ Anthropic Messages 协议 /v1/messages
+# 密钥只从环境变量读取：export SAMHO_API_KEY=magpie（Windows: setx SAMHO_API_KEY magpie）
+#
+# 与 `samho config init` 模板的差异：此处额外给出 retry / 日志与并发等常用覆盖项，
+# 供评测与长任务场景直接复制修改。省略的节回退内置默认值（serde default）。
+
+workspace = "D:/ddcode/rpi-tests/workspace-anth"   # Agent 工具沙箱根目录
+data_dir = "D:/ddcode/rpi-tests/data-anth"         # 会话/轨迹/预算落盘（CLI 与 serve 不得共用）
+http_bind = "0.0.0.0:7434"
+max_turns = 40
+max_concurrent_tasks = 2
+request_timeout_ms = 600000
+max_tool_output_bytes = 65536
+log_content = false
+durable_logs = true
+skill_roots = [".agents/skills"]
+streaming = true
+stream_buffer = 64
+
+[tools]
+read = true
+write = true
+edit = true
+list_files = true
+glob = true
+grep = true
+webfetch = true
+todo = true
+shell = true
+mcp = true
+shell_timeout_ms = 120000
+
+[retry]
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 8000
+reroute = true
+
+[budget]
+max_task_tokens = 2000000
+
+[[models]]
+id = "glm-5.3-flash"          # 必须是这个 id：RoleRouter 默认绑定按它匹配，全层级自动路由
+model = "auto/glm-5.3-flash"
+provider = "anthropic"
+tier = "reasoning"
+base_url = "http://127.0.0.1:3425"
+api_key_env = "SAMHO_API_KEY"
+context_window = 128000
+max_output_tokens = 16384     # 该网关 thinking token 计入 max_tokens 与 output_tokens，必须给足
+supports_tools = true
+supports_vision = false
+supports_reasoning = true
+streaming = true
+output_token_parameter = "max_tokens"
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+latency_ms = 3000

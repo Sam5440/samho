@@ -1,7 +1,7 @@
 # GUI 验收运行时：模型请求经本地回环转发器（forwarder.py 9600 -> wuyou 网关），
 # 因为网络策略禁止对非回环主机使用明文 HTTP。
-workspace = 'D:\ddcode\rpi'
-data_dir = 'D:\ddcode\rpi\reports\frontend-refactor\runtime-data'
+workspace = 'D:\ddcode\samho'
+data_dir = 'D:\ddcode\samho\reports\frontend-refactor\runtime-data'
 http_bind = '127.0.0.1:3777'
 durable_logs = false
 log_content = true

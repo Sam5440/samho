@@ -2003,59 +2003,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rpi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "crossterm",
- "futures-util",
- "portable-pty",
- "ratatui",
- "reqwest",
- "rpi-core",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "rpi-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "fs2",
- "futures-util",
- "ignore",
- "jsonschema",
- "rand",
- "regex",
- "reqwest",
- "rmcp",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2119,6 +2066,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "samho"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "crossterm",
+ "futures-util",
+ "portable-pty",
+ "ratatui",
+ "reqwest",
+ "samho-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "samho-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "fs2",
+ "futures-util",
+ "ignore",
+ "jsonschema",
+ "rand",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

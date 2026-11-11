@@ -1,6 +1,6 @@
 # Browser GUI validation
 
-Date: 2026-10-07. Service: real Rust `rpi serve` at `http://127.0.0.1:374`, using an isolated runtime data directory. All configured language models were **demo simulation providers**. These checks validate frontend/API integration, not real model reasoning quality.
+Date: 2026-10-07. Service: real Rust `samho serve` at `http://127.0.0.1:374`, using an isolated runtime data directory. All configured language models were **demo simulation providers**. These checks validate frontend/API integration, not real model reasoning quality.
 
 ## Checked scenarios
 

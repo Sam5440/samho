@@ -1,4 +1,4 @@
-/* rπ 设计 token —— 对齐 ZCode DESIGN.md 的派生方式：
+/* Samho 设计 token —— 对齐 ZCode DESIGN.md 的派生方式：
    语义色全部由基色调 color-mix 派生，切主题只换基色；
    字号语义刻度由 --ui-font-size 驱动；圆角分层 xl→lg→md→sm。
    全局黑白版：彩色刻度保留变量名（历史引用兼容），值全部灰阶化；

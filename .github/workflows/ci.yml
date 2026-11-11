@@ -37,9 +37,9 @@ jobs:
       - name: 中文网页与确认计划契约
         run: node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
       - name: 锁定依赖发布构建
-        run: cargo build --release --locked -p rpi
+        run: cargo build --release --locked -p samho
       - name: 跨平台真实服务冒烟
-        run: python scripts/smoke_runtime.py --binary target/release/rpi
+        run: python scripts/smoke_runtime.py --binary target/release/samho
       - name: 保留验证记录
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

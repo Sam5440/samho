@@ -1,9 +1,9 @@
 {
-    "schema":  "rpi.runtime-benchmark.v1",
+    "schema":  "samho.runtime-benchmark.v1",
     "generated_at_utc":  "2026-11-10T01:47:42.7609786Z",
     "completed":  true,
     "failure":  null,
-    "binary":  "D:\\ddcode\\rpi\\target\\release\\rpi.exe",
+    "binary":  "D:\\ddcode\\samho\\target\\release\\samho.exe",
     "binary_sha256":  "D8B6FD8229E5A5CA8CC36391EFE1A4C6C0822BFF7592AD4F84E9984B79A2C38D",
     "binary_bytes":  14363136,
     "workspace_commit":  "3a680cea961fdbd976935e65da34ea73d7b52d73",

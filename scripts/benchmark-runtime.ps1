@@ -17,9 +17,9 @@ $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-if ([string]::IsNullOrWhiteSpace($BinaryPath)) { $BinaryPath = Join-Path $repoRoot "target\release\rpi.exe" }
+if ([string]::IsNullOrWhiteSpace($BinaryPath)) { $BinaryPath = Join-Path $repoRoot "target\release\samho.exe" }
 if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
-    throw "Release binary not found: $BinaryPath. Run cargo build --release -p rpi before benchmarking."
+    throw "Release binary not found: $BinaryPath. Run cargo build --release -p samho before benchmarking."
 }
 $BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $repoRoot "reports\benchmark-runtime.json" }
@@ -30,17 +30,17 @@ if ((Test-Path -LiteralPath $OutputPath -PathType Leaf) -and -not $Force) {
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$tempRoot = Join-Path $tempParent ("rpi-runtime-benchmark-" + [guid]::NewGuid().ToString("N"))
+$tempRoot = Join-Path $tempParent ("samho-runtime-benchmark-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 $durable = -not $BufferedLogs.IsPresent
 
 # Retain the native process handle until peak memory is read, including after exit.
 # GetProcessMemoryInfo reports the Windows peak rather than a sampling estimate.
-if (-not ("RpiRuntimeBenchmark.Native" -as [type])) {
+if (-not ("SamhoRuntimeBenchmark.Native" -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-namespace RpiRuntimeBenchmark {
+namespace SamhoRuntimeBenchmark {
     [StructLayout(LayoutKind.Sequential)]
     public struct MemoryCounters {
         public uint cb, PageFaultCount;
@@ -124,7 +124,7 @@ tier = 'balanced'
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     foreach ($name in @($startInfo.EnvironmentVariables.Keys)) {
-        if ($name -match '(?i)(api_key|token|secret|password)' -or $name -in @("RPI_WORKSPACE", "RPI_DATA_DIR", "RPI_HTTP_BIND")) {
+        if ($name -match '(?i)(api_key|token|secret|password)' -or $name -in @("SAMHO_WORKSPACE", "SAMHO_DATA_DIR", "SAMHO_HTTP_BIND")) {
             $startInfo.EnvironmentVariables.Remove($name)
         }
     }
@@ -146,9 +146,9 @@ tier = 'balanced'
         $clock.Stop()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
-        $counters = [RpiRuntimeBenchmark.MemoryCounters]::new()
+        $counters = [SamhoRuntimeBenchmark.MemoryCounters]::new()
         $counters.cb = [Runtime.InteropServices.Marshal]::SizeOf($counters)
-        $memoryAvailable = [RpiRuntimeBenchmark.Native]::GetProcessMemoryInfo($processHandle, [ref]$counters, $counters.cb)
+        $memoryAvailable = [SamhoRuntimeBenchmark.Native]::GetProcessMemoryInfo($processHandle, [ref]$counters, $counters.cb)
         $peakBytes = if ($memoryAvailable) { $counters.PeakWorkingSetSize.ToUInt64() } else { $null }
         $parsed = $null
         try { $parsed = $stdout | ConvertFrom-Json } catch { }
@@ -194,7 +194,7 @@ finally {
     $dirtyStatus = Get-ToolOutput "git" @("-C", $repoRoot, "status", "--porcelain")
     $dirtyCount = @($dirtyStatus -split "\r?\n" | Where-Object { $_.Trim() }).Count
     $report = [ordered]@{
-        schema = "rpi.runtime-benchmark.v1"
+        schema = "samho.runtime-benchmark.v1"
         generated_at_utc = [DateTime]::UtcNow.ToString("o")
         completed = $null -eq $failure
         failure = $failure
@@ -229,7 +229,7 @@ finally {
     # Verify this uniquely created temp directory before the only recursive delete.
     $cleanupTarget = (Resolve-Path -LiteralPath $tempRoot).Path
     $expectedParent = $tempParent.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if (-not $cleanupTarget.StartsWith($expectedParent, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $cleanupTarget) -notmatch '^rpi-runtime-benchmark-[a-f0-9]{32}$') {
+    if (-not $cleanupTarget.StartsWith($expectedParent, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $cleanupTarget) -notmatch '^samho-runtime-benchmark-[a-f0-9]{32}$') {
         throw "Refusing cleanup of unexpected benchmark directory: $cleanupTarget"
     }
     Remove-Item -LiteralPath $cleanupTarget -Recurse -Force

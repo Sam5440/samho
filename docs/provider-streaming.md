@@ -1,6 +1,6 @@
 # Provider 注入与流式调用说明
 
-`rpi-core::provider` 提供两层接口：保留首版兼容的 `Provider::new`、
+`samho-core::provider` 提供两层接口：保留首版兼容的 `Provider::new`、
 `Provider::complete`，以及可注入的异步 `ModelProvider`。嵌入方可以通过
 `Provider::with_backend(timeout_ms, Arc<dyn ModelProvider>)` 注入自己的供应商，
 不需要修改 Agent 核心循环。自定义实现必须响应 `CancellationToken`；流式实现必须

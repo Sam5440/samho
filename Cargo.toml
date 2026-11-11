@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rpi-core", "crates/rpi-cli"]
+members = ["crates/samho-core", "crates/samho-cli"]
 
 [workspace.package]
 version = "0.1.0"

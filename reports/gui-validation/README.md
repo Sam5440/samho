@@ -1,4 +1,4 @@
-# Rust RPi GUI/TUI smoke validation — 2026-10-07
+# Rust Samho GUI/TUI smoke validation — 2026-10-07
 
 环境：Windows 11，Rust debug binary，回环地址 `127.0.0.1:374`，独立 `runtime-data`，默认 Demo provider，无模型凭证、无付费请求。
 

@@ -8,21 +8,23 @@
 
 ~~~powershell
 cargo fetch --locked
-cargo build --release --locked -p rpi
+cargo build --release --locked -p samho
 ~~~
 
-Windows 可执行文件为 target/release/rpi.exe；Linux/macOS 为 target/release/rpi。SQLite 采用 bundled SQLite，无需用户安装独立数据库。Windows 需要 Rust 的 MSVC 构建工具，Linux 需要系统 C 编译器，macOS 需要 Xcode 命令行工具。
+Windows 可执行文件为 target/release/samho.exe；Linux/macOS 为 target/release/samho。SQLite 采用 bundled SQLite，无需用户安装独立数据库。Windows 需要 Rust 的 MSVC 构建工具，Linux 需要系统 C 编译器，macOS 需要 Xcode 命令行工具。
 
 MCP Python 样例测试需要 Python 3，中文网页契约需要 Node 22；这些不是模型供应商凭据。
 
 ## 中文命令行与动态层级
 
 ~~~powershell
-cargo run -p rpi -- serve
-cargo run -p rpi -- tui --url http://127.0.0.1:7432
-cargo run -p rpi -- run "设计模块接口" --intelligence-tier architect
-cargo run -p rpi -- fork 会话ID --cutoff 3 --title "审阅分支"
+cargo run -p samho -- serve            # 默认 0.0.0.0:7432，局域网可达
+cargo run -p samho -- tui --url http://127.0.0.1:7432
+cargo run -p samho -- run "设计模块接口" --intelligence-tier architect
+cargo run -p samho -- fork 会话ID --cutoff 3 --title "审阅分支"
 ~~~
+
+服务没有身份认证；只希望在本机访问时使用 `serve --bind 127.0.0.1:7432`，局域网地址见启动日志与网页顶栏。
 
 architect 必须在配置 routing.tiers 中存在；普通 --tier 仍用于六个内置兼容层级。TUI 的 F2 层级列表从服务 state.tiers 获取，不把自定义层级写死在终端。
 
@@ -50,7 +52,7 @@ cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
 node --test scripts/test-chinese-pages.mjs
-python scripts/smoke_runtime.py --binary target/release/rpi
+python scripts/smoke_runtime.py --binary target/release/samho
 ~~~
 
 .github/workflows/ci.yml 配置 Linux、macOS 和 Windows 三平台，执行 Rust 测试、静态检查、中文网页契约、发布构建及真实本地服务冒烟，保留 reports/ci-smoke.json。冒烟脚本使用临时目录、随机回环端口和明确模拟模型，不调用收费供应商。

@@ -35,7 +35,7 @@ test('中文资料包包含 13 份文档且每份具有中文元数据', () => {
   const source = read('web/documents-data.js');
   const sandbox = { window: {} };
   vm.runInNewContext(source, sandbox, { filename: 'web/documents-data.js' });
-  const docs = sandbox.window.RpiDocuments;
+  const docs = sandbox.window.SamhoDocuments;
   assert.ok(Array.isArray(docs));
   assert.equal(docs.length, 13);
   const ids = new Set();
@@ -72,7 +72,7 @@ test('确认计划页是离线编排器，不调用任务 API 或外部网络', 
     assert.equal(executable.includes(networkToken), false, `计划页不应包含网络调用：${networkToken}`);
     assert.equal(html.includes(networkToken), false, `计划页不应包含任务接口：${networkToken}`);
   }
-  assert.match(source, /global\.RpiPlan/);
+  assert.match(source, /global\.SamhoPlan/);
   assert.match(source, /generatePlanText/);
   assert.match(source, /validatePlan/);
   assert.match(source, /computeDependencies/);
@@ -90,8 +90,8 @@ test('确认计划页是离线编排器，不调用任务 API 或外部网络', 
 function planApi() {
   const sandbox = { console, Date, globalThis: {} };
   vm.runInNewContext(read('web/plan.js'), sandbox, { filename: 'web/plan.js' });
-  assert.ok(sandbox.globalThis.RpiPlan, 'plan.js 应暴露纯函数 API');
-  return sandbox.globalThis.RpiPlan;
+  assert.ok(sandbox.globalThis.SamhoPlan, 'plan.js 应暴露纯函数 API');
+  return sandbox.globalThis.SamhoPlan;
 }
 
 function allSelected(api) {
@@ -117,7 +117,7 @@ test('计划纯函数 API 输出确定性的完整中文文本', () => {
   const first = api.generatePlanText(data, options);
   const second = api.generatePlanText(data, options);
   assert.equal(first, second);
-  assert.match(first, /RPi Rust Agent 重写/);
+  assert.match(first, /Samho Rust Agent 重写/);
   assert.match(first, /生成日期：2026-10-07/);
   assert.match(first, /测试项目/);
   assert.match(first, /验证中文计划导出/);
@@ -125,7 +125,7 @@ test('计划纯函数 API 输出确定性的完整中文文本', () => {
   assert.match(first, /未勾选范围/);
   assert.match(first, /当前 MCP 仅为已验证方法子集/);
   assert.match(first, /性能目标必须通过同机/);
-  assert.equal(api.filename(data, options), 'rpi-确认执行计划-2026-10-07.txt');
+  assert.equal(api.filename(data, options), 'samho-确认执行计划-2026-10-07.txt');
   assert.equal(api.validatePlan(data).valid, true);
 });
 
@@ -273,11 +273,11 @@ function descendants(node) { return [node, ...node.children.flatMap(descendants)
 
 test('文档渲染恶意 HTML 与 javascript 链接时保持文本，不创建可执行节点', () => {
   const fixture = documentFixture();
-  const window = { RpiDocuments: [{ id: 'guide', title: '中文说明', category: '开始使用', path: 'docs/guide.md', body: '# 正文' }], addEventListener() {} };
+  const window = { SamhoDocuments: [{ id: 'guide', title: '中文说明', category: '开始使用', path: 'docs/guide.md', body: '# 正文' }], addEventListener() {} };
   const sandbox = { window, document: fixture.document, location: { hash: '' } };
   vm.runInNewContext(read('web/docs.js'), sandbox, { filename: 'web/docs.js' });
   const raw = '# 中文标题\n\n<script>alert(1)</script>\n\n[危险](javascript:alert(1))\n\n[安全](https://example.com/说明)\n\n[内部](docs/guide.md)\n\n`<svg onload=alert(1)>`\n\n| 项目 | 说明 |\n| --- | --- |\n| 一个 | 中文 |\n\n```js\n<script>恶意文本</script>\n```';
-  const fragment = window.RpiDocs.renderMarkdown(raw);
+  const fragment = window.SamhoDocs.renderMarkdown(raw);
   const nodes = descendants(fragment);
   assert.ok(fragment.textContent.includes('<script>alert(1)</script>'));
   assert.ok(fragment.textContent.includes('<svg onload=alert(1)>'));
@@ -304,7 +304,7 @@ function mountedPlanFixture() {
     setTimeout(callback) { callback(); },
   };
   vm.runInNewContext(read('web/plan.js'), sandbox, { filename: 'web/plan.js' });
-  const api = window.RpiPlan;
+  const api = window.SamhoPlan;
   const nodes = new Map();
   const values = {
     'plan-project-name': '本地测试项目', 'plan-target': '中文目标',
@@ -377,7 +377,7 @@ test('UTF-8 BOM 下载与预览内容一致，修改字段或选择后旧导出�
   assert.deepEqual(Array.from(bytes.slice(0, 3)), [0xef, 0xbb, 0xbf], '下载文件应包含 UTF-8 BOM');
   assert.equal(Buffer.from(bytes.slice(3)).toString('utf8'), preview);
   const anchor = fixture.created.find((node) => node.tagName === 'a' && node.download);
-  assert.equal(anchor.download, 'rpi-确认执行计划-2026-10-07.txt');
+  assert.equal(anchor.download, 'samho-确认执行计划-2026-10-07.txt');
   nodes.get('plan-date').value = '2026-10-08';
   nodes.get('plan-date').dispatch('change');
   assert.equal(nodes.get('plan-download').disabled, true);

@@ -1,7 +1,7 @@
 # 远程 Facet 与多进程协作
 
-`rpi-core::facet` 提供经过认证和版本协商的远程 Object 适配器。它是 RPi 内部
-`rpi-facet/1` 协议，不冒充 MCP，也不自动启动任意远程命令。每个连接先握手，再把
+`samho-core::facet` 提供经过认证和版本协商的远程 Object 适配器。它是 Samho 内部
+`samho-facet/1` 协议，不冒充 MCP，也不自动启动任意远程命令。每个连接先握手，再把
 允许的方法公开为 `Object` capability。独立服务可以在另一个进程或主机实现协议；
 本仓库的 Python fixture 展示了一个完整、无第三方依赖的多进程 peer。
 
@@ -11,8 +11,8 @@
 [[remote_facets]]
 name = "worker"
 object_id = "facet:worker"
-endpoint = "https://worker.example.test/rpi"
-auth_token_env = "RPI_WORKER_TOKEN"
+endpoint = "https://worker.example.test/samho"
+auth_token_env = "SAMHO_WORKER_TOKEN"
 allowed_capabilities = ["analyze", "index"]
 timeout_ms = 30000
 startup_timeout_ms = 10000
@@ -61,7 +61,7 @@ Object `dispose()` 取消该 Facet 的生命周期令牌，活动调用会中断
 ## 验证
 
 ```powershell
-cargo test -p rpi-core --test facet_integration
+cargo test -p samho-core --test facet_integration
 ```
 
 测试使用本地 Axum fixture 与实际 Python 子进程，覆盖握手、版本校验、每次请求认证、

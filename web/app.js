@@ -157,7 +157,7 @@
       const item = node('article', 'message ' + role);
       const head = node('div', 'message-head');
       const names = { user: '你', assistant: '智能体', tool: '工具输出', system: '运行时', error: '执行错误' };
-      head.append(node('span', 'message-avatar', role === 'user' ? '你' : role === 'tool' ? '∷' : 'rπ'), node('span', '', names[role]));
+      head.append(node('span', 'message-avatar', role === 'user' ? '你' : role === 'tool' ? '∷' : 'Samho'), node('span', '', names[role]));
       const stamp = message.timestamp || message.timestamp_ms || message.created_at;
       if (stamp) head.append(node('time', '', dateLabel(stamp)));
       const content = contentText(message.content !== undefined ? message.content : message.text !== undefined ? message.text : message);
@@ -179,7 +179,7 @@
     const progress = task.progress;
     const item = node('article', 'message assistant live-message');
     const head = node('div', 'message-head');
-    head.append(node('span', 'message-avatar', 'rπ'), node('span', '', '智能体 · 实时输出'), node('span', 'live-badge', '第 ' + (progress.turn || 1) + ' 轮 / 尝试 ' + (progress.attempt || 1)));
+    head.append(node('span', 'message-avatar', 'Samho'), node('span', '', '智能体 · 实时输出'), node('span', 'live-badge', '第 ' + (progress.turn || 1) + ' 轮 / 尝试 ' + (progress.attempt || 1)));
     item.append(head, node('div', 'message-content', progress.text || '等待模型输出…'));
     if (progress.reasoning) {
       const details = node('details', 'live-reasoning');

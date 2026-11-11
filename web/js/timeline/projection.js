@@ -3,7 +3,7 @@
 
 // 工具卡状态：
 //   streaming（流式参数中） / running（执行中） / completed / error
-// rpi 会话消息没有工具态，完成态由后续 role=tool 消息配对得出。
+// samho 会话消息没有工具态，完成态由后续 role=tool 消息配对得出。
 
 function parseArgs(raw) {
   if (!raw) return {};

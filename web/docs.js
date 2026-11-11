@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const docs = Array.isArray(window.RpiDocuments) ? window.RpiDocuments : [];
+  const docs = Array.isArray(window.SamhoDocuments) ? window.SamhoDocuments : [];
   const byId = (id) => document.getElementById(id);
   let current = null;
   const node = (tag, text, className) => {
@@ -106,7 +106,7 @@
     byId('docs-category').textContent = current.category;
     byId('docs-path').textContent = '原始文件：' + current.path;
     byId('docs-body').replaceChildren(renderMarkdown(current.body));
-    document.title = current.title + ' · RPi 中文文档'; renderList();
+    document.title = current.title + ' · Samho 中文文档'; renderList();
   }
   byId('docs-search').addEventListener('input', renderList);
   byId('docs-download').addEventListener('click', () => {
@@ -115,5 +115,5 @@
     const a = node('a'); a.href = url; a.download = current.title + '.md'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   window.addEventListener('hashchange', select); select();
-  window.RpiDocs = { renderMarkdown };
+  window.SamhoDocs = { renderMarkdown };
 })();

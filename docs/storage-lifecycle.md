@@ -49,8 +49,8 @@ register_scope/register_in_scope 提供根与子作用域，依赖只能引用�
 执行：
 
 ~~~powershell
-cargo test -p rpi-core --test storage_lifecycle
-cargo test -p rpi-core --test core_contracts
+cargo test -p samho-core --test storage_lifecycle
+cargo test -p samho-core --test core_contracts
 ~~~
 
 新增 9 项存储/生命周期测试已通过：文件/SQLite 一致性、旧格式迁移、内部损坏/坏尾、fork 边界、ENOSPC 故障注入、轨迹轮转保留/分页恢复、SQLite 事件查询、租约超时及失败回滚、作用域与 middleware，以及跨分块凭据脱敏。既有 15 项 core_contracts 同样通过。全工作区与真实平台 CI 仍需按最终集成版本重新执行。

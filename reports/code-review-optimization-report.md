@@ -1,4 +1,4 @@
-# RPi 全面代码审查与性能优化报告
+# Samho 全面代码审查与性能优化报告
 
 **审查日期：** 2026-11-10  
 **审查提交：** `3a680cea961fdbd976935e65da34ea73d7b52d73` (`master`)  
@@ -30,8 +30,8 @@
 
 ## 评估范围与架构
 
-- **核心运行时：** `crates/rpi-core` 管理配置、模型路由、Agent 循环、工具、MCP/Skill、会话/事件存储和预算。
-- **入口与服务：** `crates/rpi-cli` 提供 `run`、`serve`、TUI、会话操作、面板 API 和动态工作区。`serve` 限制在 loopback 地址，Web 与 TUI 共用 API 和运行时。
+- **核心运行时：** `crates/samho-core` 管理配置、模型路由、Agent 循环、工具、MCP/Skill、会话/事件存储和预算。
+- **入口与服务：** `crates/samho-cli` 提供 `run`、`serve`、TUI、会话操作、面板 API 和动态工作区。`serve` 限制在 loopback 地址，Web 与 TUI 共用 API 和运行时。
 - **前端：** `web/index.html` 加载原生 ESM 和拆分 CSS；工作台、文档页、计划页均为本地静态资源。无 npm 依赖/打包链；xterm 与 canvas addon 从终端面板按需加载，文档数据不进入工作台主入口。
 - **存储与运行方式：** JSONL/SQLite 事件和会话 journal、项目清单及动态 workspace 注册表均在本地数据目录；`durable_logs=true` 默认逐次同步落盘。服务默认绑定 `127.0.0.1:7432`。
 - **信任边界：** loopback 与 Host/Origin 检查可降低远程网页滥用风险，但不是身份认证、同机进程隔离或 OS 沙箱。工具和 PTY 都以运行服务的 OS 用户权限运行。
@@ -41,7 +41,7 @@
 ### P1-01 默认工具权限没有显式用户授权，且 shell 不是沙箱
 
 - **问题描述：** 默认 `ToolPolicy` 同时开启 `write`、`edit`、`shell` 等工具。Shell 将模型传入命令交给 `powershell.exe -Command` 或 `sh -c`，工作目录限制不等同于文件/网络/进程沙箱。提示注入或被污染的仓库内容可能诱导 Agent 在当前用户权限下执行命令。与此同时 README 称写入和 shell“可选开启”，与实际默认值冲突。
-- **代码位置：** [`config.rs:224`](../crates/rpi-core/src/config.rs#L224)、[`tools.rs:634`](../crates/rpi-core/src/tools.rs#L634)、[`README.md:48`](../README.md#L48)、服务本机边界 [`server.rs:475`](../crates/rpi-cli/src/server.rs#L475) 与 [`server.rs:581`](../crates/rpi-cli/src/server.rs#L581)。
+- **代码位置：** [`config.rs:224`](../crates/samho-core/src/config.rs#L224)、[`tools.rs:634`](../crates/samho-core/src/tools.rs#L634)、[`README.md:48`](../README.md#L48)、服务本机边界 [`server.rs:475`](../crates/samho-cli/src/server.rs#L475) 与 [`server.rs:581`](../crates/samho-cli/src/server.rs#L581)。
 - **判断依据：** 静态代码确认默认值为 true，shell 使用系统命令解释器；HTTP 服务只强制 loopback。未做破坏性命令测试。
 - **影响范围：** 安全、用户数据、凭据和本机系统。风险主要来自不可信任务、外部仓库内容或本机其他程序，不代表本服务可从任意网络直接访问。
 - **修改建议：** 近期先让 shell 由明确配置/启动确认启用，并在首次启动和工作台中清楚展示“本地执行、使用当前 OS 权限”；write 与 shell 权限分开控制；为 MCP 和提示注入场景补充高风险工具确认/策略接口。若要执行不可信代码，采用 OS 级隔离（受限账户/容器/Job Object/沙箱），不要把 `current_dir` 描述成沙箱。同步修正 README 的默认行为说明。
@@ -53,7 +53,7 @@
 ### P1-02 文件面板写入可跟随 workspace 内的外部符号链接
 
 - **问题描述：** 对 `must_exist=false` 的路径，`confined()` 只 canonicalize 父目录再拼回 basename，不核验目标本身是否为符号链接。`file_write()` 随后直接 `tokio::fs::write()`，会跟随目标链接。核心工具 `within_workspace()` 对已存在链接有检查，但悬空链接时 `Path::exists()` 返回 false，转而仅校验父目录，也存在跟随写入风险。
-- **代码位置：** [`panels.rs:45`](../crates/rpi-cli/src/panels.rs#L45)、[`panels.rs:57`](../crates/rpi-cli/src/panels.rs#L57)、[`panels.rs:219`](../crates/rpi-cli/src/panels.rs#L219)、[`tools.rs:381`](../crates/rpi-core/src/tools.rs#L381)、[`tools.rs:395`](../crates/rpi-core/src/tools.rs#L395)、[`tools.rs:526`](../crates/rpi-core/src/tools.rs#L526)。
+- **代码位置：** [`panels.rs:45`](../crates/samho-cli/src/panels.rs#L45)、[`panels.rs:57`](../crates/samho-cli/src/panels.rs#L57)、[`panels.rs:219`](../crates/samho-cli/src/panels.rs#L219)、[`tools.rs:381`](../crates/samho-core/src/tools.rs#L381)、[`tools.rs:395`](../crates/samho-core/src/tools.rs#L395)、[`tools.rs:526`](../crates/samho-core/src/tools.rs#L526)。
 - **判断依据：** 静态追踪路径检查后到写入的调用链。尝试在当前 Windows 测试容器创建符号链接时，系统返回 `WinError 1314`（缺少特权），因此没有动态改写外部哨兵文件。
 - **影响范围：** 文件系统完整性和 workspace 隔离；需要攻击者/仓库内容能在 workspace 中放置链接，并让面板或 Agent 对该相对路径写入。
 - **修改建议：** 写入时采用平台支持的“不跟随最终链接”打开标志/句柄 API；检查最终组件和父目录，并避免“检查后再打开”的 TOCTOU。将面板与 core 工具集中到同一套安全路径 API。对 rename/mkdir 等也统一审查。
@@ -89,7 +89,7 @@
 ### P1-05 SessionStore 锁顺序反转存在死锁路径
 
 - **问题描述：** checkpoint 路径先持有 session mutex，再进入 `commit()` 获取 journal mutex；`delete_cascade()` 先获取 sessions 全局锁和 journal 锁，之后再等待 session mutex。并发 checkpoint 与删除同一会话时可能形成循环等待，影响共享 journal 与后续会话操作。
-- **代码位置：** [`session.rs:503`](../crates/rpi-core/src/session.rs#L503)、[`session.rs:618`](../crates/rpi-core/src/session.rs#L618)、[`session.rs:635`](../crates/rpi-core/src/session.rs#L635)、[`session.rs:657`](../crates/rpi-core/src/session.rs#L657)。
+- **代码位置：** [`session.rs:503`](../crates/samho-core/src/session.rs#L503)、[`session.rs:618`](../crates/samho-core/src/session.rs#L618)、[`session.rs:635`](../crates/samho-core/src/session.rs#L635)、[`session.rs:657`](../crates/samho-core/src/session.rs#L657)。
 - **判断依据：** 静态锁顺序分析，未做并发故障注入。已运行的 135 项测试通过，但现有测试不代表覆盖这个并发交错。
 - **影响范围：** 删除会话、任务 checkpoint、共享 session store 的请求可能挂起；若 journal 全局锁被阻塞，影响可超出单个会话。
 - **修改建议：** 先定义并文档化唯一锁顺序；优先避免在持有全局 sessions/journal 锁时 await 单个 session 锁，采用快照/版本检查或每会话操作协调器。检查所有 commit/fork/rename/archive/delete 路径的一致顺序。
@@ -101,7 +101,7 @@
 ### P1-06 新建动态工作区时只持久化新条目
 
 - **问题描述：** 动态工作区 create 将记录表以 `std::slice::from_ref(&record)` 传给 `persist()`，文件被覆盖为只含新工作区的一项。先前创建的动态 workspace 仍在当前进程 map 中，但服务重启后无法从 `workspaces.json` 恢复注册。其目录/数据未删除，属于注册信息丢失而非目录内容被删除。
-- **代码位置：** [`hub.rs:274`](../crates/rpi-cli/src/hub.rs#L274)、[`hub.rs:284`](../crates/rpi-cli/src/hub.rs#L284)、[`hub.rs:290`](../crates/rpi-cli/src/hub.rs#L290)、[`hub.rs:69`](../crates/rpi-cli/src/hub.rs#L69)。
+- **代码位置：** [`hub.rs:274`](../crates/samho-cli/src/hub.rs#L274)、[`hub.rs:284`](../crates/samho-cli/src/hub.rs#L284)、[`hub.rs:290`](../crates/samho-cli/src/hub.rs#L290)、[`hub.rs:69`](../crates/samho-cli/src/hub.rs#L69)。
 - **判断依据：** `persist()` 会把传入 slice 全量序列化并原子替换注册文件；create 传入只含当前 record 的 slice。现有测试覆盖持久化单条 roundtrip，但未覆盖连续创建多条后重启。
 - **影响范围：** 使用动态工作区多项目管理和服务重启的用户。
 - **修改建议：** 在注册表写锁内生成完整 `hub_record_list` 快照并持久化；明确持久化失败时是否回滚内存状态，避免 API 返回成功但重启丢注册。必要时使用 generation/version 乐观并发避免并发 create/rename/remove 互相覆盖。
@@ -137,7 +137,7 @@
 ### P2-09 大文件、目录、代理和 Git 子进程缺少执行前资源上限
 
 - **问题描述：** `/api/file` 对整个文件 `read()` 后才截断到 1 MiB；`/api/file/raw` 完整读入；文件/设备目录枚举不限制条目数；代理先将完整上游 body 读入内存后才检查 4 MiB；Git `.output()` 缓冲完整 stdout/stderr，diff 截断发生在子进程输出缓冲之后。并发大响应可显著增大内存。
-- **代码位置：** [`panels.rs:20`](../crates/rpi-cli/src/panels.rs#L20)、[`panels.rs:99`](../crates/rpi-cli/src/panels.rs#L99)、[`panels.rs:150`](../crates/rpi-cli/src/panels.rs#L150)、[`panels.rs:176`](../crates/rpi-cli/src/panels.rs#L176)、[`panels.rs:290`](../crates/rpi-cli/src/panels.rs#L290)、[`panels.rs:397`](../crates/rpi-cli/src/panels.rs#L397)、[`panels.rs:809`](../crates/rpi-cli/src/panels.rs#L809)。
+- **代码位置：** [`panels.rs:20`](../crates/samho-cli/src/panels.rs#L20)、[`panels.rs:99`](../crates/samho-cli/src/panels.rs#L99)、[`panels.rs:150`](../crates/samho-cli/src/panels.rs#L150)、[`panels.rs:176`](../crates/samho-cli/src/panels.rs#L176)、[`panels.rs:290`](../crates/samho-cli/src/panels.rs#L290)、[`panels.rs:397`](../crates/samho-cli/src/panels.rs#L397)、[`panels.rs:809`](../crates/samho-cli/src/panels.rs#L809)。
 - **判断依据：** 静态代码确认分配/截断顺序和无界枚举；没有运行资源耗尽压力测试。HTTP request body 的 1 MiB 限制不能限制上游响应和本地读取文件的大小。
 - **影响范围：** 本地面板在大仓库、大文件、慢/恶意上游或并发调用下的 CPU、内存和请求延迟。
 - **修改建议：** 文本文件按 `take(cap+1)` 流式读取；raw 资源限制最大 size 或以流式 body 返回；目录分页/条目上限；代理检查 Content-Length 并按 chunk 计数、超限即取消，同时限制并发；Git 子进程使用超时、管道流式采集和 stdout/stderr 上限。对大型操作返回清晰 413/超限信息。
@@ -149,7 +149,7 @@
 ### P2-10 动态 workspace 的 SSE shutdown token 与 PTY 回收不完整
 
 - **问题描述：** 根 `AppState::stop()` 只取消根状态的 token；动态 workspace 使用各自 AppState token。服务优雅退出要等 Axum 当前连接完成，而动态工作区 SSE 等待自身取消；`HubState::shutdown_all()` 又在 `serve()` 返回后才调用，可能形成关停等待。另 `workspace_remove()` 摘除 entry 后只 shutdown runtime，没有关闭其 `TermHub` 中的 PTY。
-- **代码位置：** [`server.rs:67`](../crates/rpi-cli/src/server.rs#L67)、[`server.rs:591`](../crates/rpi-cli/src/server.rs#L591)、[`server.rs:601`](../crates/rpi-cli/src/server.rs#L601)、[`hub.rs:146`](../crates/rpi-cli/src/hub.rs#L146)、[`hub.rs:366`](../crates/rpi-cli/src/hub.rs#L366)、[`term.rs:231`](../crates/rpi-cli/src/term.rs#L231)。
+- **代码位置：** [`server.rs:67`](../crates/samho-cli/src/server.rs#L67)、[`server.rs:591`](../crates/samho-cli/src/server.rs#L591)、[`server.rs:601`](../crates/samho-cli/src/server.rs#L601)、[`hub.rs:146`](../crates/samho-cli/src/hub.rs#L146)、[`hub.rs:366`](../crates/samho-cli/src/hub.rs#L366)、[`term.rs:231`](../crates/samho-cli/src/term.rs#L231)。
 - **判断依据：** 静态生命周期追踪；没有在打开动态 SSE/PTY 时做服务退出故障注入。
 - **影响范围：** 有长期 SSE 或终端会话时的服务重启、workspace 移除和子进程资源回收。
 - **修改建议：** 用 root shutdown token 的 child token 统一创建所有 workspace state；优雅关停阶段先取消所有 workspace/task SSE，再等待有限 grace period，之后关 PTY、运行时和 MCP。workspace remove 时先停止接受新请求、取消任务、关闭 PTY，最后 shutdown runtime 并持久化结果。
@@ -161,7 +161,7 @@
 ### P2-11 durable event sync 与 session checkpoint 随历史增长
 
 - **问题描述：** 默认 `durable_logs=true`，事件追加在持锁路径中每条 `flush` 后执行 `sync_data()`；会话 checkpoint 将 session 序列化/脱敏、克隆已提交消息，再扫描共同前缀并复制增量。Agent 在模型响应、工具观察等边界多次 checkpoint。工具密集任务和长会话可能因磁盘同步与历史复制增长而变慢。
-- **代码位置：** [`config.rs:254`](../crates/rpi-core/src/config.rs#L254)、[`events.rs:464`](../crates/rpi-core/src/events.rs#L464)、[`events.rs:481`](../crates/rpi-core/src/events.rs#L481)、[`session.rs:503`](../crates/rpi-core/src/session.rs#L503)、[`session.rs:507`](../crates/rpi-core/src/session.rs#L507)、[`agent.rs:870`](../crates/rpi-core/src/agent.rs#L870)、[`agent.rs:1212`](../crates/rpi-core/src/agent.rs#L1212)。
+- **代码位置：** [`config.rs:254`](../crates/samho-core/src/config.rs#L254)、[`events.rs:464`](../crates/samho-core/src/events.rs#L464)、[`events.rs:481`](../crates/samho-core/src/events.rs#L481)、[`session.rs:503`](../crates/samho-core/src/session.rs#L503)、[`session.rs:507`](../crates/samho-core/src/session.rs#L507)、[`agent.rs:870`](../crates/samho-core/src/agent.rs#L870)、[`agent.rs:1212`](../crates/samho-core/src/agent.rs#L1212)。
 - **判断依据：** 代码路径确认；本轮 Demo 基准不含工具调用，且没有区分 storage/checkpoint 阶段，故不能证明该优化对当前样本有收益。
 - **影响范围：** 慢磁盘、长会话、事件密集和工具调用密集任务的任务延迟及 journal 锁持有时间。
 - **修改建议：** 首先为事件 append、session commit、provider、tool execution 分段埋点；使用借用切片减少 base clone，评估维护 committed length/version 的增量前缀比较。若做 group commit，必须提供明确 durability window 和故障保证，保持 strict-sync 模式可选，不能静默降低持久性。
@@ -209,7 +209,7 @@
 ### P3-15 项目持久化失败后内存与磁盘状态分离
 
 - **问题描述：** ProjectStore 的 create/update/delete 先修改内存 map 再持久化；写盘失败时 API 返回错误，但内存变更未回滚。启动加载用 `if let Ok(bytes)` 把任何读取错误都当作无项目，而不只把 NotFound 视作空集合。
-- **代码位置：** [`projects.rs:55`](../crates/rpi-core/src/projects.rs#L55)、[`projects.rs:58`](../crates/rpi-core/src/projects.rs#L58)、[`projects.rs:80`](../crates/rpi-core/src/projects.rs#L80)、[`projects.rs:93`](../crates/rpi-core/src/projects.rs#L93)、[`projects.rs:104`](../crates/rpi-core/src/projects.rs#L104)、[`projects.rs:122`](../crates/rpi-core/src/projects.rs#L122)。
+- **代码位置：** [`projects.rs:55`](../crates/samho-core/src/projects.rs#L55)、[`projects.rs:58`](../crates/samho-core/src/projects.rs#L58)、[`projects.rs:80`](../crates/samho-core/src/projects.rs#L80)、[`projects.rs:93`](../crates/samho-core/src/projects.rs#L93)、[`projects.rs:104`](../crates/samho-core/src/projects.rs#L104)、[`projects.rs:122`](../crates/samho-core/src/projects.rs#L122)。
 - **判断依据：** 静态追踪；现有 storage lifecycle 测试覆盖其他 journal 写失败路径，但项目清单路径需单独测试。
 - **影响范围：** 磁盘满、权限错误或只读数据目录情况下的项目列表一致性和重启行为。
 - **修改建议：** 先构造候选 map/clone 并成功原子持久化后替换内存状态，或写失败回滚；启动时仅 NotFound 返回空，其余 IO 错误显式报告并保留原始数据。
@@ -221,7 +221,7 @@
 ### P3-16 任务索引按条目数回收但无字节预算
 
 - **问题描述：** 任务快照索引到 1024 条才清理完成项；结果对象/错误体没有字节预算，`GET /api/tasks` 会克隆并返回所有快照。大量长输出任务会消耗常驻内存并产生大响应。
-- **代码位置：** [`server.rs:961`](../crates/rpi-cli/src/server.rs#L961)、[`server.rs:1006`](../crates/rpi-cli/src/server.rs#L1006)、[`server.rs:1052`](../crates/rpi-cli/src/server.rs#L1052)。
+- **代码位置：** [`server.rs:961`](../crates/samho-cli/src/server.rs#L961)、[`server.rs:1006`](../crates/samho-cli/src/server.rs#L1006)、[`server.rs:1052`](../crates/samho-cli/src/server.rs#L1052)。
 - **判断依据：** 静态代码；没有长期运行/大量结果 soak 数据。
 - **影响范围：** 长时间不重启的本地服务及大量大结果/错误响应。
 - **修改建议：** 设置总字节估算预算、按完成时间 TTL/LRU 回收、列表分页；将大结果保存在 session/trace 中，任务列表保留摘要并提供按 ID 查询。定义运行中任务不被回收的规则。
@@ -251,7 +251,7 @@
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 通过 | 无 warning |
 | `node --test scripts/test-chinese-pages.mjs` | **13/13 通过** | 覆盖中文页面/计划页，不覆盖全部工作台交互 |
 | `node scripts/check-web-esm.mjs` | 通过语法检查 | 共检查脚本列出的 12 个 ESM；部分模块因没有 DOM 环境出现被脚本预期处理的 runtime 报错，故不是完整浏览器运行测试 |
-| `cargo build --release --locked -p rpi` | 通过 | 本次约 7m46s；Windows release exe 14,310,912 bytes |
+| `cargo build --release --locked -p samho` | 通过 | 本次约 7m46s；Windows release exe 14,310,912 bytes |
 | 当前二进制本地 API/任务 | 通过 | 隔离临时 workspace/data；health、`/api/run`、task poll 均通过，使用 Demo，无外部模型/付费调用 |
 | 当前二进制 Demo 基准 | **20 样本通过** | 3 次预热；进程到完成 p50 254.154ms、p95 271.439ms；峰值工作集 p50 12,060,672 bytes、p95 12,107,776 bytes。指标定义见报告开头 |
 | 浏览器桌面工作台 | 通过加载 | API 连接、会话侧栏、任务输入、事件流和检查面板可见 |

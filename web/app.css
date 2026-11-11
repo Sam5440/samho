@@ -71,6 +71,23 @@
 .status-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--subtle-foreground); }
 .status-dot.online { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 20%, transparent); }
 .status-dot.offline { background: var(--destructive); }
+.lan-endpoint {
+  max-width: 19rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-xs);
+  cursor: pointer;
+}
+.lan-endpoint:hover { color: var(--foreground); border-color: var(--brand); }
+.lan-endpoint:focus-visible { outline: 2px solid var(--ring, var(--brand)); outline-offset: 2px; }
+@media (max-width: 1190px) { .lan-endpoint { display: none; } }
 
 /* ---------- 侧栏 ---------- */
 .sidebar {

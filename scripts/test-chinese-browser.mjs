@@ -14,14 +14,14 @@ const basePort = Number(new URL(base).port);
 assert.ok(basePort >= 300 && basePort <= 400, '测试服务端口必须在 300-400');
 const reportDir = path.join(root, 'reports', 'chinese-pages');
 await fs.mkdir(reportDir, { recursive: true });
-const chromeCandidates = [process.env.RPI_CHROME, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
+const chromeCandidates = [process.env.SAMHO_CHROME, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
 let chromePath;
 for (const candidate of chromeCandidates) {
   try { await fs.access(candidate); chromePath = candidate; break; } catch {}
 }
-assert.ok(chromePath, '未找到 Chrome；可通过 RPI_CHROME 指定浏览器路径');
-const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'rpi-chinese-browser-'));
-const cdpPort = Number(process.env.RPI_CDP_PORT || 390);
+assert.ok(chromePath, '未找到 Chrome；可通过 SAMHO_CHROME 指定浏览器路径');
+const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'samho-chinese-browser-'));
+const cdpPort = Number(process.env.SAMHO_CDP_PORT || 390);
 assert.ok(cdpPort >= 300 && cdpPort <= 400, 'CDP 测试端口必须在 300-400');
 const browser = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-extensions', '--disable-component-update', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -101,7 +101,7 @@ try {
     assert.ok(value, name);
     report.checks.push({ name, passed: true });
   }
-  await navigate(base + '/plan', 'Boolean(window.RpiPlan)');
+  await navigate(base + '/plan', 'Boolean(window.SamhoPlan)');
   await check('服务页面显示 47 项，默认全选', "document.querySelectorAll('input[data-plan-item]:checked').length === 47");
   await cdp.evaluate("document.getElementById('plan-clear').click(); document.getElementById('plan-generate').click()");
   await check('空范围禁止导出', "document.getElementById('plan-download').disabled && document.getElementById('plan-message').textContent.includes('至少勾选')");
@@ -114,7 +114,7 @@ try {
   await cdp.evaluate("document.getElementById('plan-generate').click()");
   await check('用户备注为纯文本', "!window.planInjected && !document.querySelector('img[src=x]') && document.getElementById('plan-preview').value.includes('<img src=x onerror=window.planInjected=true>中文备注')");
   // 把浏览器生成的实际 Blob 下载到报告目录，逐字核对 UTF-8 BOM 和预览。
-  const expected = await cdp.evaluate("({filename: RpiPlan.filename(RpiPlan.collect(document.querySelector('[data-rpi-plan-generator]'))), text: document.getElementById('plan-preview').value})");
+  const expected = await cdp.evaluate("({filename: SamhoPlan.filename(SamhoPlan.collect(document.querySelector('[data-samho-plan-generator]'))), text: document.getElementById('plan-preview').value})");
   downloadedPath = path.join(reportDir, expected.filename);
   try { await fs.unlink(path.join(reportDir, expected.filename)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   await cdp.evaluate("document.getElementById('plan-download').click()");
@@ -136,11 +136,11 @@ try {
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
     await fs.writeFile(path.join(reportDir, `plan-${width}.png`), Buffer.from(screenshot.data, 'base64'));
   }
-  await navigate(base + '/docs', 'Boolean(window.RpiDocuments && window.RpiDocs)');
-  await check('13 份中文文档与代码块可阅读', "RpiDocuments.length === 13 && document.querySelectorAll('#docs-body pre code').length >= 4");
+  await navigate(base + '/docs', 'Boolean(window.SamhoDocuments && window.SamhoDocs)');
+  await check('13 份中文文档与代码块可阅读', "SamhoDocuments.length === 13 && document.querySelectorAll('#docs-body pre code').length >= 4");
   await cdp.evaluate("const s=document.getElementById('docs-search'); s.value='MCP'; s.dispatchEvent(new Event('input',{bubbles:true}))");
   await check('搜索中文资料有效', "document.querySelectorAll('#docs-list button').length > 0 && !document.getElementById('docs-count').textContent.startsWith('0 /')");
-  for (const doc of await cdp.evaluate('RpiDocuments.map(d=>({id:d.id,title:d.title}))')) {
+  for (const doc of await cdp.evaluate('SamhoDocuments.map(d=>({id:d.id,title:d.title}))')) {
     await cdp.evaluate(`location.hash=${JSON.stringify(doc.id)}`);
     await until(() => cdp.evaluate(`document.getElementById('docs-title').textContent === ${JSON.stringify(doc.title)}`), doc.id);
     await check('文档可渲染：' + doc.title, "document.getElementById('docs-body').textContent.length > 100");
@@ -153,11 +153,11 @@ try {
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
   await fs.writeFile(path.join(reportDir, 'docs-375.png'), Buffer.from(screenshot.data, 'base64'));
   // 直接打开文件，验证页面不依赖 Rust 服务或 HTTP API。
-  await navigate(pathToFileURL(path.join(root, 'web', 'plan.html')).href, 'Boolean(window.RpiPlan)');
+  await navigate(pathToFileURL(path.join(root, 'web', 'plan.html')).href, 'Boolean(window.SamhoPlan)');
   await cdp.evaluate("document.getElementById('plan-generate').click()");
   await check('计划页支持 file:// 离线生成', "document.getElementById('plan-preview').value.includes('回传确认模板') && !document.getElementById('plan-download').disabled");
-  await navigate(pathToFileURL(path.join(root, 'web', 'docs.html')).href, 'Boolean(window.RpiDocuments && window.RpiDocs)');
-  await check('文档页支持 file:// 离线阅读', "RpiDocuments.length===13 && document.getElementById('docs-body').textContent.includes('中文使用说明')");
+  await navigate(pathToFileURL(path.join(root, 'web', 'docs.html')).href, 'Boolean(window.SamhoDocuments && window.SamhoDocs)');
+  await check('文档页支持 file:// 离线阅读', "SamhoDocuments.length===13 && document.getElementById('docs-body').textContent.includes('中文使用说明')");
   report.requests = cdp.events.filter(e=>e.method==='Network.requestWillBeSent').map(e=>({url:e.params.request.url,method:e.params.request.method,type:e.params.type}));
   assert.ok(!report.requests.some(r=>/\/api\//.test(r.url)), 'docs/plan 不调用任何 API');
   report.errors = cdp.events.filter(e=>e.method==='Runtime.exceptionThrown' || e.method==='Log.entryAdded' && ['error','warning'].includes(e.params.entry.level));
@@ -183,7 +183,7 @@ try {
   }
   // 删除范围限定在本次 mkdtemp 产生的测试目录，不触及用户浏览器配置。
   const cleanup = path.resolve(profile);
-  assert.ok(path.dirname(cleanup) === path.resolve(os.tmpdir()) && path.basename(cleanup).startsWith('rpi-chinese-browser-'));
+  assert.ok(path.dirname(cleanup) === path.resolve(os.tmpdir()) && path.basename(cleanup).startsWith('samho-chinese-browser-'));
   try { await fs.rm(cleanup, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {}
 }
 console.log(JSON.stringify({ status: report.status, checks: report.checks.length, report: path.join(reportDir, 'browser-validation.json'), failure: report.failure }, null, 2));

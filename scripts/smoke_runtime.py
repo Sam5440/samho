@@ -24,8 +24,8 @@ def request(base, path, body=None, method=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="RPi 跨平台模拟服务冒烟")
-    parser.add_argument("--binary", default="target/release/rpi")
+    parser = argparse.ArgumentParser(description="Samho 跨平台模拟服务冒烟")
+    parser.add_argument("--binary", default="target/release/samho")
     parser.add_argument("--report", default="reports/ci-smoke.json")
     parser.add_argument("--force", action="store_true", help="允许覆盖已存在的报告文件")
     parser.add_argument("--port", type=int, default=373)
@@ -36,10 +36,10 @@ def main():
     if os.name == "nt" and not binary.suffix:
         binary = binary.with_suffix(".exe")
     if not binary.is_file():
-        raise SystemExit("请先构建 rpi 发布二进制")
+        raise SystemExit("请先构建 samho 发布二进制")
     checks = []
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="rpi-smoke-") as root:
+    with tempfile.TemporaryDirectory(prefix="samho-smoke-") as root:
         root = Path(root)
         with socket.socket() as reservation:
             candidates = list(range(args.port, 401)) + list(range(300, args.port))
@@ -54,7 +54,7 @@ def main():
             port = reservation.getsockname()[1]
         base = f"http://127.0.0.1:{port}"
         env = os.environ.copy()
-        env.update(RPI_WORKSPACE=str(root), RPI_DATA_DIR=str(root / "data"), RPI_HTTP_BIND=f"127.0.0.1:{port}")
+        env.update(SAMHO_WORKSPACE=str(root), SAMHO_DATA_DIR=str(root / "data"), SAMHO_HTTP_BIND=f"127.0.0.1:{port}")
         log_path = root / "server.log"
         with log_path.open("wb") as output:
             process = subprocess.Popen([str(binary), "serve"], env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -72,7 +72,7 @@ def main():
                         time.sleep(0.1)
                 checks.append("真实二进制启动与健康")
                 state = request(base, "/api/state")
-                assert state["service"] == "rpi"
+                assert state["service"] == "samho"
                 assert state["simulation"] is True
                 assert "中文" in request(base, "/docs")
                 assert "确认" in request(base, "/plan")

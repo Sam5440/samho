@@ -72,14 +72,14 @@ test('项目制侧栏：项目树不使用 innerHTML，附属行默认折叠', (
 });
 
 test('后端项目制 API 契约：项目 patch 支持 folders/entry/open，附属面板可持久化', () => {
-  const server = read('crates/rpi-cli/src/server.rs');
+  const server = read('crates/samho-cli/src/server.rs');
   assert.match(server, /session_attachments_get/, 'GET attachments handler');
   assert.match(server, /session_attachments_put/, 'PUT attachments handler');
   assert.match(server, /validate_project_path/, '文件夹路径需 confined 复核');
-  const term = read('crates/rpi-cli/src/term.rs');
+  const term = read('crates/samho-cli/src/term.rs');
   assert.match(term, /list_by_session/, 'term list by session');
-  const projects = read('crates/rpi-core/src/projects.rs');
+  const projects = read('crates/samho-core/src/projects.rs');
   assert.match(projects, /pub folders/, 'Project.folders 字段');
   assert.match(projects, /pub entry/, 'Project.entry 字段');
-  assert.match(read('crates/rpi-core/src/agent.rs'), /migrate_default_project/, '默认项目迁移');
+  assert.match(read('crates/samho-core/src/agent.rs'), /migrate_default_project/, '默认项目迁移');
 });

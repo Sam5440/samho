@@ -1,14 +1,14 @@
-# agent.md — RPi 智能体工作框架完整参考
+# agent.md — Samho 智能体工作框架完整参考
 
-本文件是 RPi 仓库的权威工程参考，供人类开发者与 AI 编码代理（agent）使用。内容基于 2026-10-27 对全部源码、文档、脚本与 CI 配置的完整阅读。凡与旧文档冲突，以本文件与源码为准。
+本文件是 Samho 仓库的权威工程参考，供人类开发者与 AI 编码代理（agent）使用。内容基于 2026-10-27 对全部源码、文档、脚本与 CI 配置的完整阅读。凡与旧文档冲突，以本文件与源码为准。
 
 ---
 
 ## 一、项目定位
 
-RPi 是 **Pi coding agent（TypeScript）的 Rust 增量重写工程**，目标是把 Pi 的智能体执行语义（Agent 循环、流式、工具、会话树、MCP、技能）移植到 Rust，并加入自有设计：统一 Object 生命周期、六级模型路由策略、确定性上下文投影、预算预留、调用轨迹与脱敏。
+Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写工程**，目标是把 Pi 的智能体执行语义（Agent 循环、流式、工具、会话树、MCP、技能）移植到 Rust，并加入自有设计：统一 Object 生命周期、六级模型路由策略、确定性上下文投影、预算预留、调用轨迹与脱敏。
 
-- **语言/形态**：Rust workspace（两个 crate）+ 本地 Web GUI（中文）+ Ratatui TUI，单二进制 `rpi`。
+- **语言/形态**：Rust workspace（两个 crate）+ 本地 Web GUI（中文）+ Ratatui TUI，单二进制 `samho`。
 - **上游参考**（`upstream/`，gitignore，完整 clone，仅作分析不参与构建）：
   - Pi `earendil-works/pi` @ `2db5e359`（MIT）
   - DSH `deepseek-ai/deepseek-harness` @ `5badb150`（MIT）
@@ -19,21 +19,21 @@ RPi 是 **Pi coding agent（TypeScript）的 Rust 增量重写工程**，目标�
 ## 二、仓库结构
 
 ```
-D:\ddcode\rpi\
+D:\ddcode\samho\
 ├── Cargo.toml               # workspace：resolver=2，edition 2024，rust-version 1.88
 ├── crates/
-│   ├── rpi-core/            # 异步运行时库（无二进制）
+│   ├── samho-core/            # 异步运行时库（无二进制）
 │   │   └── src/{agent,model,provider,tools,session,events,context,budget,
 │   │          object,skills,mcp,mcp/oauth.rs,facet,config,lib,test_support}.rs
 │   │   └── tests/           # 12 个集成测试文件 + fixtures/（Python MCP fixture）
-│   └── rpi-cli/             # 包名 rpi，二进制 rpi
+│   └── samho-cli/             # 包名 samho，二进制 samho
 │       └── src/{main,server,tui}.rs
 ├── web/                     # 内嵌进二进制的中文 Web GUI（include_str!）
 │   ├── index.html + app.js + style.css + chinese.css     # 工作台 /
 │   ├── docs.html + docs.js + docs.css + documents-data.js # 文档中心 /docs（离线可用）
 │   └── plan.html + plan.js + plan.css                     # 确认计划页 /plan（纯离线）
 ├── docs/                    # 中文文档（13 份），architecture/implementation-status 为状态权威
-├── examples/rpi.chat.toml   # 真实 Provider 配置示例
+├── examples/samho.chat.toml   # 真实 Provider 配置示例
 ├── scripts/                 # 测试/基准/打包脚本（见 §13）
 ├── reports/                 # 验证证据（json/log/md/截图）；*.log 例外地入库
 ├── .github/workflows/ci.yml # 三平台 CI
@@ -41,7 +41,7 @@ D:\ddcode\rpi\
 └── upstream/                # 上游参考源码（不入库）
 ```
 
-数据目录（默认 `.rpi/`，可用 `data_dir` 配置）：`sessions.jsonl`（或 `sessions.sqlite`）、`events.jsonl`（或 `events.sqlite`）、`budget.jsonl`、`runtime.lock`（fs2 独占锁，单写者）、`ui.json`。
+数据目录（默认 `.samho/`，可用 `data_dir` 配置）：`sessions.jsonl`（或 `sessions.sqlite`）、`events.jsonl`（或 `events.sqlite`）、`budget.jsonl`、`runtime.lock`（fs2 独占锁，单写者）、`ui.json`。
 
 ## 三、构建与运行
 
@@ -49,25 +49,25 @@ D:\ddcode\rpi\
 
 ```powershell
 # 构建
-cargo build --release --locked -p rpi          # 产物 target/release/rpi.exe（bundled SQLite）
+cargo build --release --locked -p samho          # 产物 target/release/samho.exe（bundled SQLite）
 
 # 运行（CLI 直接开本地数据目录；两个进程不能同时写同一 data_dir）
-cargo run -p rpi -- run "/demo read README.md" --complexity 2 --json
-cargo run -p rpi -- run "任务" --tier reasoning            # 内置六级
-cargo run -p rpi -- run "任务" --intelligence-tier architect # 自定义层级（须在 routing.tiers 定义）
-cargo run -p rpi -- run "任务" --model demo-fast --skill my-skill
-cargo run -p rpi -- inspect                                # 查看运行时状态（脱敏 JSON）
-cargo run -p rpi -- replay [trace_id] [--export trace.jsonl]
-cargo run -p rpi -- fork <session_id> --cutoff 3 --title "分支"
-cargo run -p rpi -- config init rpi.toml                   # 已存在则报错
+cargo run -p samho -- run "/demo read README.md" --complexity 2 --json
+cargo run -p samho -- run "任务" --tier reasoning            # 内置六级
+cargo run -p samho -- run "任务" --intelligence-tier architect # 自定义层级（须在 routing.tiers 定义）
+cargo run -p samho -- run "任务" --model demo-fast --skill my-skill
+cargo run -p samho -- inspect                                # 查看运行时状态（脱敏 JSON）
+cargo run -p samho -- replay [trace_id] [--export trace.jsonl]
+cargo run -p samho -- fork <session_id> --cutoff 3 --title "分支"
+cargo run -p samho -- config init samho.toml                   # 已存在则报错
 
 # 共享服务 + 两个客户端
-cargo run -p rpi -- serve --bind 127.0.0.1:7432            # 只允许回环地址
-cargo run -p rpi -- tui --url http://127.0.0.1:7432        # TUI 客户端；浏览器打开 http://127.0.0.1:7432
+cargo run -p samho -- serve --bind 0.0.0.0:7432            # 默认局域网可达；--bind 127.0.0.1:7432 可收回本机
+cargo run -p samho -- tui --url http://127.0.0.1:7432        # TUI 客户端；浏览器打开 http://127.0.0.1:7432
 
 # 配置
-cargo run -p rpi -- --config rpi.toml serve
-# 环境覆盖：RPI_HTTP_BIND、RPI_WORKSPACE、RPI_DATA_DIR（优先于 TOML）
+cargo run -p samho -- --config samho.toml serve
+# 环境覆盖：SAMHO_HTTP_BIND、SAMHO_WORKSPACE、SAMHO_DATA_DIR（优先于 TOML）
 ```
 
 验证命令（提交前必须全绿）：
@@ -85,7 +85,7 @@ python scripts/build-chinese-docs.py                       # 改 docs/*.md 后�
 
 ```
 Web(中文工作台) ─┐
-TUI(Ratatui) ────┤→ Axum 本地服务(HTTP+SSE, 仅回环, 拒跨源) → AgentRuntime(并发许可)
+TUI(Ratatui) ────┤→ Axum 本地服务(HTTP+SSE, 默认 0.0.0.0, 拒跨源) → AgentRuntime(并发许可)
 CLI run/inspect/replay/fork ─┘                              │
    AgentRuntime → ModelRouter(六级策略/评分) → Provider(模拟器|Chat Completions)
               → ToolRegistry(内置工具+自定义+MCP+Skill 门控)
@@ -93,19 +93,20 @@ CLI run/inspect/replay/fork ─┘                              │
               → BudgetTracker(预留/结算/重启恢复) + ObjectRegistry(拓扑激活/租约/热替换)
 ```
 
-- `rpi-core` 是全部业务逻辑；`rpi-cli` 只是适配层（HTTP 服务、TUI、CLI 三个入口共享同一运行时）。
+- `samho-core` 是全部业务逻辑；`samho-cli` 只是适配层（HTTP 服务、TUI、CLI 三个入口共享同一运行时）。
 - Web 与 TUI 不各自维护 Agent 循环，全部经 HTTP API 与服务端共享状态。
-- 服务安全：只绑定回环；`Origin` 必须等于 `http://{Host}`；`Host` 必须 localhost/127.0.0.1/[::1]；无 CORS；响应带 CSP 与 `X-Content-Type-Options: nosniff`；请求体上限 1 MiB。
+- 服务安全：默认监听 `0.0.0.0`；`Origin` 必须等于 `http://{Host}`；`Host` 只接受 loopback、本机网卡 IP 或本机主机名（防 DNS rebinding）；无 CORS；响应带 CSP 与 `X-Content-Type-Options: nosniff`；请求体上限 1 MiB。没有身份认证，只应在可信局域网使用。
 
-## 五、rpi-core 模块参考
+## 五、samho-core 模块参考
 
 ### 5.1 config.rs — RuntimeConfig（全部 TOML 键，`deny_unknown_fields`）
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `workspace` | `"."` | 工作区根，工具路径约束在其内 |
-| `data_dir` | `".rpi"` | 会话/事件/预算/锁存放处 |
-| `http_bind` | `"127.0.0.1:7432"` | serve 地址（必须回环） |
+| `display_name` | `"Samho"` | 工作区显示名（页面顶栏），不依赖磁盘目录名 |
+| `data_dir` | `".samho"` | 会话/事件/预算/锁存放处 |
+| `http_bind` | `"0.0.0.0:7432"` | serve 地址（局域网可达；回环用 `127.0.0.1:7432`） |
 | `system_prompt` | 见源码 | 会话 system 消息；自动追加可用技能清单 |
 | `max_turns` | `20` | Agent 循环轮次上限 |
 | `max_concurrent_tasks` | `4` | 全局并发任务信号量 |
@@ -226,9 +227,9 @@ CLI run/inspect/replay/fork ─┘                              │
 
 ### 5.13 facet.rs — 远程 Facet
 
-`rpi-facet/1` 协议：HTTPS（回环可 `allow_insecure_loopback`）+ Bearer（`auth_token_env`）+ 能力白名单（必填）；`/handshake /invoke /cancel`；traceparent 透传；取消 best-effort ≤250ms；dispose 后调用返回 Disconnected。这是受控远程对象适配器，**不是**任意远程执行。
+`samho-facet/1` 协议：HTTPS（回环可 `allow_insecure_loopback`）+ Bearer（`auth_token_env`）+ 能力白名单（必填）；`/handshake /invoke /cancel`；traceparent 透传；取消 best-effort ≤250ms；dispose 后调用返回 Disconnected。这是受控远程对象适配器，**不是**任意远程执行。
 
-## 六、HTTP API（rpi-cli/src/server.rs）
+## 六、HTTP API（samho-cli/src/server.rs）
 
 静态：`/`、`/docs`、`/plan` 及对应 css/js（`include_str!` 内嵌）。
 
@@ -246,11 +247,11 @@ CLI run/inspect/replay/fork ─┘                              │
 | GET `/api/events/page` | 分页封装 `{events, has_more, next_cursor, first_available_sequence}` |
 | GET `/api/events/stream` | SSE `event: trace`（`id:`=序号）+ `gap` + keepalive 15s；支持 `Last-Event-ID` |
 | GET `/api/live/stream` | SSE `event: progress`（累计快照，revision 单调）+ `gap` |
-| GET `/api/traces/{id}/timeline` `/export` | 展示式复盘（不重执行）；导出 Markdown（固定文件名 RPi-trace.md，>16MiB 413） |
+| GET `/api/traces/{id}/timeline` `/export` | 展示式复盘（不重执行）；导出 Markdown（固定文件名 Samho-trace.md，>16MiB 413） |
 | GET/PUT `/api/ui` | 主题 dark/light/system + 三个快捷键；非法 400 |
 | GET `/api/workspaces` | default + 配置多工作区；`/w/{id}` 挂载**独立运行时**（独立 data_dir/会话/预算），`/w/{id}/` 尾斜杠由 fallback 308 重定向（axum 0.8 nest 不匹配尾斜杠且路由先于中间件） |
 
-## 七、TUI（rpi-cli/src/tui.rs）
+## 七、TUI（samho-cli/src/tui.rs）
 
 纯 HTTP 客户端：`/api/health` 连通性检查 → 800ms 轮询 8 个资源端点 → 提交后 250ms 轮询任务。
 
@@ -262,7 +263,7 @@ CLI run/inspect/replay/fork ─┘                              │
 
 - **工作台 `/`**：任务提交（自动分级/复杂度滑条/层级/模型/技能勾选）、会话侧栏、steer/follow-up 模式选择、实时进度（SSE）、轨迹面板（分页+SSE+按 trace 过滤+导出）、对象/MCP/技能面板、UI 设置、多工作区切换。
 - **文档中心 `/docs`**：13 份中文文档，搜索/分类/hash 路由/.md 下载（BOM）。数据源 `web/documents-data.js` 由 `python scripts/build-chinese-docs.py` 生成——改 docs 后必须重跑。
-- **确认计划 `/plan`**：纯离线（不发任何 API 请求），47 个范围项（已完成/部分完成/未完成），依赖检查告警，导出 `rpi-确认执行计划-YYYY-MM-DD.txt`（UTF-8 BOM）。勾选只是范围选择，回传完整文本才执行。
+- **确认计划 `/plan`**：纯离线（不发任何 API 请求），47 个范围项（已完成/部分完成/未完成），依赖检查告警，导出 `samho-确认执行计划-YYYY-MM-DD.txt`（UTF-8 BOM）。勾选只是范围选择，回传完整文本才执行。
 
 ## 九、测试与端口策略
 
@@ -293,5 +294,5 @@ CLI run/inspect/replay/fork ─┘                              │
 1. TUI `/theme contrast` 与服务端 `validate_ui`（dark/light/system）词汇不一致 → 400。
 2. TUI 进度视图工具计数行存在字面 `format!("?????{}", n)` 疑似乱码图标。
 3. 完成任务索引仅内存（1024 上限、重启清空），`GET /api/tasks/{id}` 404 属预期。
-4. trace 导出文件名固定 `RPi-trace.md`。
+4. trace 导出文件名固定 `Samho-trace.md`。
 5. GLM 思考模型在 `max_tokens` 过小时 content 为空（网关侧行为），配置需 ≥512。

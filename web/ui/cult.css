@@ -32,7 +32,7 @@
     var(--beam-to, var(--c-blue-500)) 350deg,
     transparent 360deg
   );
-  animation: rpi-beam-spin var(--beam-duration, var(--dur-beam)) linear infinite;
+  animation: samho-beam-spin var(--beam-duration, var(--dur-beam)) linear infinite;
 }
 [data-beam]::after {
   content: "";
@@ -55,7 +55,7 @@
     transparent 360deg
   );
 }
-@keyframes rpi-beam-spin {
+@keyframes samho-beam-spin {
   to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -109,7 +109,7 @@
 .halo-progress[data-mode="indeterminate"] .halo-fill {
   width: 25%;
   transform: none;
-  animation: rpi-halo-slide 1.5s ease-in-out infinite;
+  animation: samho-halo-slide 1.5s ease-in-out infinite;
 }
 .halo-spark {
   position: absolute;
@@ -122,14 +122,14 @@
   background: var(--brand);
   opacity: 0.9;
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 25%, transparent);
-  animation: rpi-halo-pulse 1.6s ease-in-out infinite;
+  animation: samho-halo-pulse 1.6s ease-in-out infinite;
 }
 .halo-progress[data-mode="indeterminate"] .halo-spark { opacity: 0; animation: none; }
-@keyframes rpi-halo-slide {
+@keyframes samho-halo-slide {
   from { transform: translateX(-100%); }
   to { transform: translateX(400%); }
 }
-@keyframes rpi-halo-pulse {
+@keyframes samho-halo-pulse {
   50% { opacity: 0.35; transform: scale(0.8); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -145,8 +145,8 @@
   height: 1.05em;
   translate: 0 0.16em;
   background: currentColor;
-  animation: rpi-term-blink 1.05s steps(1) infinite;
+  animation: samho-term-blink 1.05s steps(1) infinite;
 }
-@keyframes rpi-term-blink {
+@keyframes samho-term-blink {
   50% { opacity: 0; }
 }

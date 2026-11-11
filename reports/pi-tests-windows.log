@@ -104,7 +104,7 @@ not ok 12 - wires multiple direct packages without registry fallbacks
   ---
   duration_ms: 6395.7226
   type: 'test'
-  location: 'D:\\ddcode\\rpi\\upstream\\pi\\scripts\\local-package-install.test.mjs:89:1'
+  location: 'D:\\ddcode\\samho\\upstream\\pi\\scripts\\local-package-install.test.mjs:89:1'
   failureType: 'testCodeFailure'
   error: 'spawnSync npm ENOENT'
   code: 'ENOENT'

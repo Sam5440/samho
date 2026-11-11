@@ -7,14 +7,14 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-if (-not $BinaryPath) { $BinaryPath = Join-Path $repoRoot "target\release\rpi.exe" }
+if (-not $BinaryPath) { $BinaryPath = Join-Path $repoRoot "target\release\samho.exe" }
 $BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
 $reportPath = Join-Path $repoRoot "reports\release-web-smoke.json"
 if ((Test-Path -LiteralPath $reportPath -PathType Leaf) -and -not $Force) {
     throw "Report already exists: $reportPath. Pass -Force to overwrite existing evidence."
 }
 $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$smokeRoot = Join-Path $tempParent ("rpi-web-smoke-" + [guid]::NewGuid().ToString("N"))
+$smokeRoot = Join-Path $tempParent ("samho-web-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $smokeRoot | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $configPath = Join-Path $smokeRoot "runtime.toml"
@@ -55,7 +55,7 @@ function Start-SmokeService {
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    foreach ($name in @("RPI_DATA_DIR", "RPI_WORKSPACE", "RPI_HTTP_BIND")) { $info.EnvironmentVariables.Remove($name) }
+    foreach ($name in @("SAMHO_DATA_DIR", "SAMHO_WORKSPACE", "SAMHO_HTTP_BIND")) { $info.EnvironmentVariables.Remove($name) }
     $script:service = [Diagnostics.Process]::new()
     $script:service.StartInfo = $info
     $null = $script:service.Start()
@@ -100,7 +100,7 @@ try {
         if ($response.StatusCode -ne 200) { throw "Bundled asset missing: $asset" }
     }
     $first = Invoke-SmokeTask @{prompt = "/demo read README.md"; profile = @{automatic = $false; complexity = 2}}
-    if ($first.result.model_id -ne "demo-fast" -or $first.result.turns -ne 2 -or $first.result.output -notmatch "RPi") { throw "Read tool loop mismatch" }
+    if ($first.result.model_id -ne "demo-fast" -or $first.result.turns -ne 2 -or $first.result.output -notmatch "Samho") { throw "Read tool loop mismatch" }
     $second = Invoke-SmokeTask @{session_id = $first.result.session_id; prompt = "continue the smoke task"; profile = @{automatic = $false; complexity = 7; tier = "reasoning"}}
     if ($second.result.session_id -ne $first.result.session_id -or $second.result.model_id -ne "demo-reasoning") { throw "Session/tier override mismatch" }
     $list = Invoke-SmokeJson "$baseUrl/api/sessions"
@@ -132,7 +132,7 @@ try {
     $tail = @($tail)
     if ($tail.Count -eq 0 -or $tail[0].sequence -ne ($beforeRestart + 1)) { throw "Restart trace sequence mismatch" }
     $report = [ordered]@{
-        schema = "rpi.release-web-smoke.v1"
+        schema = "samho.release-web-smoke.v1"
         generated_at_utc = [DateTime]::UtcNow.ToString("o")
         binary_sha256 = (Get-FileHash -LiteralPath $BinaryPath -Algorithm SHA256).Hash
         passed = $true
@@ -152,6 +152,6 @@ try {
     Stop-SmokeService
     $resolved = [IO.Path]::GetFullPath($smokeRoot)
     $expectedParent = $tempParent.TrimEnd('\') + '\'
-    if (-not $resolved.StartsWith($expectedParent, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $resolved) -notlike "rpi-web-smoke-*") { throw "Refusing cleanup outside smoke temporary root" }
+    if (-not $resolved.StartsWith($expectedParent, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $resolved) -notlike "samho-web-smoke-*") { throw "Refusing cleanup outside smoke temporary root" }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }

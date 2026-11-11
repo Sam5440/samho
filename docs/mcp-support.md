@@ -1,6 +1,6 @@
 # MCP 支持说明
 
-本文描述 `rpi-core` 当前的 MCP 客户端边界。实现基于官方 Rust SDK
+本文描述 `samho-core` 当前的 MCP 客户端边界。实现基于官方 Rust SDK
 [`rmcp` 3.5.1](https://crates.io/crates/rmcp)，协议编解码、JSON-RPC 请求
 ID、初始化协商和取消通知均由 SDK 完成。本文记录的是代码和集成测试已经验证的
 能力，不把接口声明或上游设计文档当作完整 MCP 兼容性证明。
@@ -23,7 +23,7 @@ scrub_env = true
 [[mcp_servers]]
 name = "remote"
 url = "https://mcp.example.test/mcp"
-bearer_token_env = "RPI_MCP_TOKEN"
+bearer_token_env = "SAMHO_MCP_TOKEN"
 timeout_ms = 30000
 ```
 
@@ -82,12 +82,12 @@ notifications 和本地 input/output Schema 校验。OAuth PKCE loopback、refre
 ## 测试覆盖
 
 真实协议 fixture 位于
-[`crates/rpi-core/tests/fixtures/mcp_server.py`](../crates/rpi-core/tests/fixtures/mcp_server.py)，
+[`crates/samho-core/tests/fixtures/mcp_server.py`](../crates/samho-core/tests/fixtures/mcp_server.py)，
 使用 Python stdio peer；HTTP 测试使用 axum 启动真实 Streamable HTTP endpoint。运行：
 
 ```powershell
-cargo test -p rpi-core --test mcp_integration -- --nocapture
-cargo test -p rpi-core --test core_contracts -- --nocapture
+cargo test -p samho-core --test mcp_integration -- --nocapture
+cargo test -p samho-core --test core_contracts -- --nocapture
 ```
 
 集成测试当前覆盖：

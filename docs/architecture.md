@@ -1,12 +1,12 @@
-# RPi 架构说明
+# Samho 架构说明
 
 本文描述当前增量 Rust 重写实现，用于说明代码结构和服务边界，不表示已达到 Pi、DSH、ZCode 或 MCP 的全部功能对等。已完成能力与未完成项见[实现状态](implementation-status.md)。
 
 ## 一、共享服务边界
 
-`rpi-core` 负责异步运行时。`AgentRuntime`（Agent 运行时）验证配置、取得数据目录锁、发现技能（Skill）、连接 MCP 服务、注册对象（Object）、创建模型路由器和模型服务适配器（Provider），并管理会话与调用轨迹存储。任务执行通过 Rust API 提供。
+`samho-core` 负责异步运行时。`AgentRuntime`（Agent 运行时）验证配置、取得数据目录锁、发现技能（Skill）、连接 MCP 服务、注册对象（Object）、创建模型路由器和模型服务适配器（Provider），并管理会话与调用轨迹存储。任务执行通过 Rust API 提供。
 
-`rpi-cli` 是入口适配层。`serve` 创建一个运行时并提供本地回环 Web API；网页工作台与终端界面（TUI）都调用该 API，共享任务限制、会话、模型决策、对象元数据和轨迹事件。`run`、`inspect`、`replay` 是同一核心上的命令行适配入口。本版本仅绑定回环地址，并拒绝跨来源请求。
+`samho-cli` 是入口适配层。`serve` 创建一个运行时并提供本地 Web API；网页工作台与终端界面（TUI）都调用该 API，共享任务限制、会话、模型决策、对象元数据和轨迹事件。`run`、`inspect`、`replay` 是同一核心上的命令行适配入口。服务默认监听 `0.0.0.0` 以便局域网访问，并拒绝跨来源请求；没有身份认证，只应在可信局域网使用。
 
 ```mermaid
 flowchart TD

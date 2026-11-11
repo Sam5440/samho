@@ -1,5 +1,5 @@
 /target/
-/.rpi/
+/.samho/
 __pycache__/
 *.pyc
 *.log

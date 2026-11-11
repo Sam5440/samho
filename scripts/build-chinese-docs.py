@@ -24,7 +24,7 @@ def main():
     for doc_id, title, category, path in CATALOG:
         body = (ROOT / path).read_text(encoding="utf-8-sig")
         entries.append(dict(id=doc_id, title=title, category=category, path=path, body=body))
-    output = "// 由 scripts/build-chinese-docs.py 生成；修改原始 Markdown 后重新运行。\nwindow.RpiDocuments = " + json.dumps(entries, ensure_ascii=False) + ";\n"
+    output = "// 由 scripts/build-chinese-docs.py 生成；修改原始 Markdown 后重新运行。\nwindow.SamhoDocuments = " + json.dumps(entries, ensure_ascii=False) + ";\n"
     (ROOT / "web/documents-data.js").write_text(output, encoding="utf-8")
     print(f"已打包 {len(entries)} 份中文文档：web/documents-data.js")
 

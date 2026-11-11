@@ -4,17 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>RPi · 中文确认计划</title>
-  <meta name="description" content="阅读 RPi 重写基线，勾选实施范围，生成可回传对话的中文确认执行计划。">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'10'%20fill%3D'%23f3efe3'%2F%3E%3Ctext%20x%3D'9'%20y%3D'45'%20fill%3D'%233b584b'%20font-family%3D'Georgia%2Cserif'%20font-style%3D'italic'%20font-size%3D'41'%3Er%CF%80%3C%2Ftext%3E%3C%2Fsvg%3E">
+  <title>Samho · 中文确认计划</title>
+  <meta name="description" content="阅读 Samho 重写基线，勾选实施范围，生成可回传对话的中文确认执行计划。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'10'%20fill%3D'%23f3efe3'%2F%3E%3Ctext%20x%3D'9'%20y%3D'45'%20fill%3D'%233b584b'%20font-family%3D'Georgia%2Cserif'%20font-style%3D'italic'%20font-size%3D'41'%3ES%3C%2Ftext%3E%3C%2Fsvg%3E">
   <link rel="stylesheet" href="plan.css">
   <script src="plan.js" defer></script>
 </head>
 <body>
   <a class="plan-skip" href="#plan-target">跳到项目目标</a>
-  <div class="plan-page" data-rpi-plan-generator>
+  <div class="plan-page" data-samho-plan-generator>
     <header class="plan-topbar">
-      <a class="plan-brand" href="index.html"><span aria-hidden="true">rπ</span><div><strong>RPi 项目审阅</strong><small>Rust Agent 框架 · 本地优先</small></div></a>
+      <a class="plan-brand" href="index.html"><span aria-hidden="true">Samho</span><div><strong>Samho 项目审阅</strong><small>Rust Agent 框架 · 本地优先</small></div></a>
       <nav aria-label="页面导航"><a href="docs.html">中文文档</a><a href="index.html">Agent 工作台 <span aria-hidden="true">↗</span></a></nav>
       <span class="plan-edition">确认计划 / 01</span>
     </header>
@@ -42,7 +42,7 @@
             <section class="plan-section" aria-labelledby="plan-goal-heading">
               <div class="plan-section-title"><span>01</span><div><h2 id="plan-goal-heading">项目目标与执行边界</h2><p>写清楚要交付什么，以及这轮实施需要遵守的约束。</p></div></div>
               <div class="plan-fields">
-                <label class="plan-field"><span>项目名称</span><input id="plan-project-name" maxlength="120" value="RPi · 可扩展 Rust Agent 框架"></label>
+                <label class="plan-field"><span>项目名称</span><input id="plan-project-name" maxlength="120" value="Samho · 可扩展 Rust Agent 框架"></label>
                 <label class="plan-field"><span>计划日期</span><input id="plan-date" type="date" required></label>
                 <label class="plan-field plan-field-full"><span>项目目标 <b>必填</b></span><textarea id="plan-target" rows="3" maxlength="6000" required>在 Pi 原有设计与已完成的 Rust 首版基线上，构建高性能、高扩展、可自定义的 Agent 框架：统一 Object 生命周期，按任务智力需求分配模型，完善 MCP 与 Skill 支持，提供共用 Rust 服务的中文 TUI / 本地 Web GUI，以及可复盘的日志与调用轨迹。</textarea></label>
                 <label class="plan-field"><span>最高优先级 <b>必选</b></span><select id="plan-priority" required><option value="功能完整性与 Pi 任务执行语义">功能完整性与 Pi 任务执行语义</option><option value="Object 扩展接口与高度自定义">Object 扩展接口与高度自定义</option><option value="模型路由质量与成本约束">模型路由质量与成本约束</option><option value="MCP / Skill 协议覆盖与兼容性">MCP / Skill 协议覆盖与兼容性</option><option value="日志复盘、可靠性与恢复">日志复盘、可靠性与恢复</option><option value="性能、吞吐与存储增长">性能、吞吐与存储增长</option><option value="中文 GUI / TUI 使用体验">中文 GUI / TUI 使用体验</option></select></label>
@@ -82,7 +82,7 @@
               <label class="plan-preview-label" for="plan-preview">确认计划文本预览 <small>可选择文本手动复制</small></label>
               <textarea id="plan-preview" class="plan-preview" rows="16" readonly placeholder="点击“生成完整确认计划”，这里将显示可直接回传对话的中文文本。"></textarea>
               <div class="plan-export-buttons"><button id="plan-copy" type="button" disabled>复制全文</button><button id="plan-download" type="button" disabled>下载 .txt 文件 <span aria-hidden="true">↓</span></button><span>UTF-8 + BOM · 兼容 Windows 记事本</span></div>
-              <p class="plan-return-note">下载后将 <strong>rpi-确认执行计划-日期.txt</strong> 发回此对话框。也可以粘贴全文；请保留目标、范围、边界和验收门槛。</p>
+              <p class="plan-return-note">下载后将 <strong>samho-确认执行计划-日期.txt</strong> 发回此对话框。也可以粘贴全文；请保留目标、范围、边界和验收门槛。</p>
             </section>
           </form>
         </div>
@@ -98,7 +98,7 @@
         </aside>
       </div>
     </main>
-    <footer class="plan-footer"><span>RPi · Rust Agent 框架</span><span>中文审阅 / 本地生成 / 明确确认</span></footer>
+    <footer class="plan-footer"><span>Samho · Rust Agent 框架</span><span>中文审阅 / 本地生成 / 明确确认</span></footer>
   </div>
 </body>
 </html>

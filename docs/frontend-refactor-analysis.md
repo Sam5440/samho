@@ -1,7 +1,7 @@
-# rπ Web 工作台前端重构基准 — OpenCode × ZCode 分析与落地设计
+# Samho Web 工作台前端重构基准 — OpenCode × ZCode 分析与落地设计
 
 > 依据：OpenCode（sst/opencode，`upstream/opencode`）与 ZCode v3.14.3（`upstream/zcode`）源码深度分析。
-> 目标：对 rπ 的 Web 工作台做完整重构——对齐 ZCode 的会话管理与轨迹追踪、OpenCode 的消息/工具/思考渲染，
+> 目标：对 Samho 的 Web 工作台做完整重构——对齐 ZCode 的会话管理与轨迹追踪、OpenCode 的消息/工具/思考渲染，
 > 全局 UI 以 shadcn/ui 风格组件库落地（vanilla JS + CSS 变量，无框架、无构建，受 CSP `script-src 'self'; style-src 'self'` 约束）。
 
 ---
@@ -120,7 +120,7 @@
 
 ---
 
-## 二、rπ 落地设计
+## 二、Samho 落地设计
 
 ### 1. 技术约束与决策
 
@@ -130,7 +130,7 @@
 - markdown 自渲染：先全量转义再生成白名单标签（标题/列表/代码块/行内代码/粗斜体/引用/链接/表格），杜绝 XSS。
 - 服务端已有能力直接复用：SSE 双流（progress 快照 + trace 事件）、`/api/events/page` 分页、`/api/sessions/{id}` 完整消息、`TaskRequest.session_id` 续聊。
 
-### 2. 后端改造（rpi-core + rpi-cli）
+### 2. 后端改造（samho-core + samho-cli）
 
 | 改动 | 位置 | 说明 |
 |---|---|---|
@@ -203,4 +203,4 @@ web/
 ### 5. 测试计划
 
 - **cargo**：session.rs 新增 rename/archived/delete_cascade 单元测试（含 fork 级联、运行中拒绝、journal 重放一致性）；server.rs 新路由契约测试（PATCH/DELETE/静态资源/CSP 下无 style 属性依赖）。
-- **GUI（浏览器）**：`rpi serve` + 真实模型，逐项验收：新建/发送/续聊、工具卡三态、思考折叠、轨迹面板（CallCard/搜索/展开）、会话重命名/归档/删除、模型选择、主题切换、快捷键；截图存 `reports/frontend-refactor/`。
+- **GUI（浏览器）**：`samho serve` + 真实模型，逐项验收：新建/发送/续聊、工具卡三态、思考折叠、轨迹面板（CallCard/搜索/展开）、会话重命名/归档/删除、模型选择、主题切换、快捷键；截图存 `reports/frontend-refactor/`。

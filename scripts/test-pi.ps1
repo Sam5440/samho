@@ -1,5 +1,5 @@
 param(
-    [string]$WorkspaceRoot = "D:\ddcode\rpi",
+    [string]$WorkspaceRoot = "D:\ddcode\samho",
     [string]$Package = "",
     [string]$Command = "npm test",
     [string]$ReportName = "pi-tests-windows"
@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $piRoot = Join-Path $WorkspaceRoot "upstream\pi"
 $reportRoot = Join-Path $WorkspaceRoot "reports"
-$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("rpi-pi-test-" + [guid]::NewGuid())
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("samho-pi-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $testRoot, $reportRoot -Force | Out-Null
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = Join-Path $env:SystemRoot "System32\cmd.exe"

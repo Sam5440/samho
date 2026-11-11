@@ -1,12 +1,12 @@
-# RPi 本地 Web API / SSE 验收记录
+# Samho 本地 Web API / SSE 验收记录
 
 日期：2026-10-22  
-范围：`crates/rpi-cli/src/server.rs` 的路由契约与内存 `Router` 集成测试  
+范围：`crates/samho-cli/src/server.rs` 的路由契约与内存 `Router` 集成测试  
 
 ## 已执行
 
 ```text
-cargo test -p rpi --bin rpi server::tests -- --nocapture
+cargo test -p samho --bin samho server::tests -- --nocapture
 ```
 
 结果：**10 passed，0 failed，0 ignored**。
@@ -24,7 +24,7 @@ cargo test -p rpi --bin rpi server::tests -- --nocapture
 
 ## 测试端口约束
 
-HTTP Provider fixture 使用 `rpi_core::test_support::bind_loopback`，只从 `301..=399` 选择回环端口，避免使用 `:0`。本文件中的路由 `Router` 测试不监听网络端口。OAuth 回调等其他模块应继续复用同一 helper。
+HTTP Provider fixture 使用 `samho_core::test_support::bind_loopback`，只从 `301..=399` 选择回环端口，避免使用 `:0`。本文件中的路由 `Router` 测试不监听网络端口。OAuth 回调等其他模块应继续复用同一 helper。
 
 ## 证据边界
 

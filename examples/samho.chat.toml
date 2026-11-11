@@ -1,0 +1,21 @@
+# Copy to samho.toml and replace the example endpoint/model.
+workspace = "."
+data_dir = ".samho"
+http_bind = "0.0.0.0:7432"
+
+[[models]]
+id = "openai-compatible"
+model = "your-model-id"
+provider = "chat_completions"
+tier = "balanced"
+base_url = "https://api.example.test/v1"
+api_key_env = "SAMHO_API_KEY"
+context_window = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_vision = false
+supports_reasoning = false
+output_token_parameter = "max_tokens"
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+latency_ms = 1000

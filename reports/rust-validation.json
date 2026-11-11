@@ -52,7 +52,7 @@
       "evidence": "benchmark-runtime.json"
     },
     {
-      "check": "examples/rpi.chat.toml parsed, validated and serialized through rpi config init",
+      "check": "examples/samho.chat.toml parsed, validated and serialized through samho config init",
       "exit_code": 0
     }
   ],
