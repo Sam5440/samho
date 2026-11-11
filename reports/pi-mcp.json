@@ -1,7 +1,0 @@
-﻿{
-    "package":  "packages/mcp",
-    "command":  "node ../../node_modules/vitest/dist/cli.js --run test/client.test.ts test/content.test.ts test/oauth.test.ts test/stdio.test.ts test/streamable-http.test.ts",
-    "test_home":  "C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-615d1742-14e8-49b0-aad4-da549f159f19",
-    "environment":  "isolated Windows process without provider credentials",
-    "exit_code":  0
-}

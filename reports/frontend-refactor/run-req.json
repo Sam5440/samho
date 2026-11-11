@@ -1,1 +1,0 @@
-{"prompt": "请一步步仔细推理这道题：一个三位数，各位数字之和为 15；把百位与个位交换后，新数比原数小 198。求原数。给出推理过程与最终答案。", "profile": {"automatic": false, "complexity": 4, "tier": null, "model": "glm-5.3-flash"}, "skills": []}

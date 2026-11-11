@@ -60,7 +60,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
 ```
 
-Rust 当前 workspace 共 **141 项测试**（CLI 41、core 单元 22、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
+Rust 当前 workspace 共 **155 项测试**（CLI 46、core 单元 31、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
 
 本机验收脚本默认拒绝覆盖既有报告，重跑需显式 `-Force`（PowerShell）或 `--force`（Python）：
 
@@ -70,9 +70,9 @@ powershell -NoProfile -File scripts/benchmark-runtime.ps1 -Force
 python scripts/smoke_runtime.py --force
 ```
 
-浏览器验收已验证自动分级、同会话续接、手动 reasoning tier、固定 model、重启恢复与 trace/Object 展示；桌面及 560×900 窄屏无水平溢出，最终启动请求全部 200，控制台无 error/warning。详情及截图见 [reports/gui-validation/browser-validation.md](reports/gui-validation/browser-validation.md)。浏览器此轮未配置实际 MCP server/Skill，也未调用真实语言模型；对应协议和加载逻辑由 Rust 集成测试覆盖。
+浏览器验收已覆盖自动分级、同会话续接、手动 reasoning tier、固定 model、重启恢复与 trace/Object 展示；桌面及 560×900 窄屏无水平溢出，控制台无 error/warning。历史验收截图与报告已清理；当前回归由 `scripts/smoke_runtime.py`、`scripts/smoke-web.ps1` 与 Rust/Node 契约测试持续覆盖。浏览器验收未配置实际 MCP server/Skill，也未调用真实语言模型；对应协议和加载逻辑由 Rust 集成测试覆盖。
 
-上游测试、当前实现状态和性能边界见 [docs/implementation-status.md](docs/implementation-status.md)。release 本地基准脚本为 `scripts/benchmark-runtime.ps1`；不据此宣称相对 Pi 的速度倍率。
+当前实现状态和性能边界见 [docs/implementation-status.md](docs/implementation-status.md)。release 本地基准脚本为 `scripts/benchmark-runtime.ps1`；不据此宣称相对 Pi 的速度倍率。
 
 ## 中文文档与确认计划
 
@@ -86,13 +86,13 @@ python scripts/smoke_runtime.py --force
 
 ## 上游与分析
 
-三份仓库均为完整 Git clone（非 shallow/partial），保留在 `upstream/`，各自具有独立 Git 元数据和许可证；为避免重复入库，主工程忽略该目录。
+上游参考仓库（pi/dsh/opencode/zcode）为分析期临时 clone，未入库，现已随本轮清理移除；固定提交记录保留在 [docs/upstream-lock.json](docs/upstream-lock.json)，需要时可据此重新 clone。
 
-| 项目 | 本地位置 | 固定提交 |
-| --- | --- | --- |
-| Pi，`earendil-works/pi` | `upstream/pi` | `2db5e359bf84c1c0be51d2c5c5c5c7cf27072c2b` |
-| DSH，`deepseek-ai/deepseek-harness` | `upstream/dsh` | `5badb15009ae1756c3afe0ae0cef1faafc290ccc` |
-| ZCode，`zai-org/ZCode` | `upstream/zcode` | `29628c9acdb81b703bbd4080c207a0e7ce5e276e` |
+| 项目 | 固定提交 |
+| --- | --- |
+| Pi，`earendil-works/pi` | `2db5e359bf84c1c0be51d2c5c5c5c7cf27072c2b` |
+| DSH，`deepseek-ai/deepseek-harness` | `5badb15009ae1756c3afe0ae0cef1faafc290ccc` |
+| ZCode，`zai-org/ZCode` | `29628c9acdb81b703bbd4080c207a0e7ce5e276e` |
 
 源码证据与重写设计：
 

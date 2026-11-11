@@ -14,7 +14,6 @@ CATALOG = [
     ("mcp", "MCP 支持能力与边界", "实现设计", "docs/mcp-support.md"),
     ("status", "实现状态与后续阶段", "实现设计", "docs/implementation-status.md"),
     ("validation", "多场景测试与性能验证", "验证与交付", "docs/validation-plan.md"),
-    ("benchmark", "本机模拟任务性能基准", "验证与交付", "reports/benchmark-runtime.md"),
     ("ports", "测试端口策略", "验证与交付", "docs/test-port-policy.md"),
     ("facets", "Remote Facet 远程扩展", "实现设计", "docs/remote-facets.md"),
 ]

@@ -2,7 +2,7 @@
 
 ## 范围、版本与证据方法
 
-本文针对 `upstream/pi`（远端 `earendil-works/pi`，工作树 `main`，提交时间 2026-10-07）做静态代码与文档审计。分析覆盖 `ai`、`agent`、`durable`、`chord`、`telemetry`、`coding-agent`、`mcp`、`codemode`、`tui`、`protocol`、`client` 和 `server`。完整读取了 Agent/loop、MCP client、virtual-model、skill loader、telemetry reference adapter、Chord public API 等关键文件；大型 `AgentSession`/TUI/provider 实现按关键路径定位，未声称逐行审完仓库全部代码。引用路径均以 `upstream/pi` 为根。检查时上游没有 `node_modules`，本报告没有把构建或模型请求结果冒充实测结果。
+本文针对 `upstream/pi`（远端 `earendil-works/pi`，工作树 `main`，提交时间 2026-10-07）做静态代码与文档审计。分析覆盖 `ai`、`agent`、`durable`、`chord`、`telemetry`、`coding-agent`、`mcp`、`codemode`、`tui`、`protocol`、`client` 和 `server`。完整读取了 Agent/loop、MCP client、virtual-model、skill loader、telemetry reference adapter、Chord public API 等关键文件；大型 `AgentSession`/TUI/provider 实现按关键路径定位，未声称逐行审完仓库全部代码。引用路径均以 `upstream/pi` 为根（分析期本地 clone 已清理，commit 见 `docs/upstream-lock.json`）。检查时上游没有 `node_modules`，本报告没有把构建或模型请求结果冒充实测结果。
 
 静态规模（PowerShell `Get-ChildItem src -Recurse -File` / `Get-Content | Measure-Object -Line` 统计口径，含源码目录中的资源）：`ai` 197 文件/24,339 行，`coding-agent` 311/84,543，`chord` 30/8,284，`durable` 67/18,965，`tui` 45/17,146，`mcp` 18/2,907，`agent` 6/2,288，`telemetry` 6/826。根 `package.json` 要求 Node `>=22.19.0`，构建顺序为 chord → tui → telemetry → codemode → mcp → ai → durable → env → agent → protocol → client → server → coding-agent。
 

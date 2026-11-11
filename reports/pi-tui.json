@@ -1,7 +1,0 @@
-﻿{
-    "package":  "packages/tui",
-    "command":  "node --test test/*.test.ts",
-    "test_home":  "C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-ec31ef3b-e014-4410-a98e-4197c601bf56",
-    "environment":  "isolated Windows process without provider credentials",
-    "exit_code":  1
-}

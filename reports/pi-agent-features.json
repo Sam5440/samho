@@ -1,7 +1,0 @@
-﻿{
-    "package":  "packages/coding-agent",
-    "command":  "node ../../node_modules/vitest/dist/cli.js --run test/skills.test.ts test/virtual-models.test.ts test/extensions-runner.test.ts test/agent-session-concurrent.test.ts test/agent-session-runtime-events.test.ts",
-    "test_home":  "C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-76a613f5-c104-4b9c-862a-ecdb673291c4",
-    "environment":  "isolated Windows process without provider credentials",
-    "exit_code":  0
-}

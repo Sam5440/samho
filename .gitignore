@@ -1,12 +1,7 @@
 /target/
 /.samho/
+/upstream/
 __pycache__/
 *.pyc
 *.log
-!/reports/*.log
-/upstream/
-/reports/gui-validation/runtime-data/
-/reports/gui-validation/runtime.toml
 .zcode/
-/reports/frontend-refactor/runtime-data/
-/.rui-check/

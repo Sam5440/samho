@@ -2,7 +2,7 @@
 
 分析日期：2026-10-07。本文记录固定上游版本的设计事实、适合 Rust 重写的迁移原则，以及尚未验证的边界；不把阅读源码等同于运行测试或性能测量。
 
-下载核验：`upstream/dsh` 的完整 Git clone 已完成，HEAD 为下表 SHA，`git rev-parse --is-shallow-repository` 为 false；`upstream/zcode` 同样已完整下载并 checkout。源码目录与固定版本可以在本地重新检查。
+下载核验：分析期曾对 `upstream/dsh` 与 `upstream/zcode` 做完整 Git clone 并 checkout 到下表 SHA；本地副本已随清理移除，可按 `docs/upstream-lock.json` 的 commit 重新 clone 检查。
 
 | 项目 | 官方仓库 | 分析基准 | 许可证 |
 | --- | --- | --- | --- |

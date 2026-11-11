@@ -1,7 +1,0 @@
-﻿{
-    "package":  "packages/agent",
-    "command":  "node ../../node_modules/vitest/dist/cli.js --run test/agent.test.ts test/agent-loop.test.ts test/proxy.test.ts",
-    "test_home":  "C:\\Users\\11025\\AppData\\Local\\Temp\\samho-pi-test-94e35a67-73f5-42e8-8a9e-1f09a88951ba",
-    "environment":  "isolated Windows process without provider credentials",
-    "exit_code":  0
-}

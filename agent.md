@@ -9,7 +9,7 @@
 Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写工程**，目标是把 Pi 的智能体执行语义（Agent 循环、流式、工具、会话树、MCP、技能）移植到 Rust，并加入自有设计：统一 Object 生命周期、六级模型路由策略、确定性上下文投影、预算预留、调用轨迹与脱敏。
 
 - **语言/形态**：Rust workspace（两个 crate）+ 本地 Web GUI（中文）+ Ratatui TUI，单二进制 `samho`。
-- **上游参考**（`upstream/`，gitignore，完整 clone，仅作分析不参与构建）：
+- **上游参考**（分析期临时 clone，现已清理，不参与构建；来源与 commit 见 `docs/upstream-lock.json`）：
   - Pi `earendil-works/pi` @ `2db5e359`（MIT）
   - DSH `deepseek-ai/deepseek-harness` @ `5badb150`（MIT）
   - ZCode `zai-org/ZCode` @ `29628c9a`（Apache-2.0）
@@ -19,8 +19,8 @@ Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写工程**，目�
 ## 二、仓库结构
 
 ```
-D:\ddcode\samho\
-├── Cargo.toml               # workspace：resolver=2，edition 2024，rust-version 1.88
+D:\ddcode\rpi\
+├── Cargo.toml               # workspace：resolver=2，edition 2024，rust-version：1.88
 ├── crates/
 │   ├── samho-core/            # 异步运行时库（无二进制）
 │   │   └── src/{agent,model,provider,tools,session,events,context,budget,
@@ -29,16 +29,15 @@ D:\ddcode\samho\
 │   └── samho-cli/             # 包名 samho，二进制 samho
 │       └── src/{main,server,tui}.rs
 ├── web/                     # 内嵌进二进制的中文 Web GUI（include_str!）
-│   ├── index.html + app.js + style.css + chinese.css     # 工作台 /
+│   ├── index.html + app.css + js/ + ui/                   # 工作台 /
 │   ├── docs.html + docs.js + docs.css + documents-data.js # 文档中心 /docs（离线可用）
 │   └── plan.html + plan.js + plan.css                     # 确认计划页 /plan（纯离线）
-├── docs/                    # 中文文档（13 份），architecture/implementation-status 为状态权威
+├── docs/                    # 中文文档（12 份），architecture/implementation-status 为状态权威
 ├── examples/samho.chat.toml   # 真实 Provider 配置示例
 ├── scripts/                 # 测试/基准/打包脚本（见 §13）
-├── reports/                 # 验证证据（json/log/md/截图）；*.log 例外地入库
+├── reports/                 # CI 冒烟输出（reports/ci-smoke.json）；历史验证产物已清理
 ├── .github/workflows/ci.yml # 三平台 CI
-├── agent.md                 # 本文件
-└── upstream/                # 上游参考源码（不入库）
+└── agent.md                 # 本文件
 ```
 
 数据目录（默认 `.samho/`，可用 `data_dir` 配置）：`sessions.jsonl`（或 `sessions.sqlite`）、`events.jsonl`（或 `events.sqlite`）、`budget.jsonl`、`runtime.lock`（fs2 独占锁，单写者）、`ui.json`。
@@ -74,10 +73,10 @@ cargo run -p samho -- --config samho.toml serve
 
 ```powershell
 cargo fmt --all -- --check
-cargo test --workspace --locked                            # 135 项（2026-10-31 基线）
+cargo test --workspace --locked                            # 155 项（2026-11-11 基线）
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
-node --test scripts/test-chinese-pages.mjs                 # 13 项中文网页契约
-node --check web/app.js
+node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs  # 21 项中文网页契约
+node scripts/check-web-esm.mjs                             # 前端 ES Module 语法检查
 python scripts/build-chinese-docs.py                       # 改 docs/*.md 后必须重跑，重新生成 web/documents-data.js
 ```
 
@@ -262,12 +261,12 @@ CLI run/inspect/replay/fork ─┘                              │
 ## 八、Web GUI
 
 - **工作台 `/`**：任务提交（自动分级/复杂度滑条/层级/模型/技能勾选）、会话侧栏、steer/follow-up 模式选择、实时进度（SSE）、轨迹面板（分页+SSE+按 trace 过滤+导出）、对象/MCP/技能面板、UI 设置、多工作区切换。
-- **文档中心 `/docs`**：13 份中文文档，搜索/分类/hash 路由/.md 下载（BOM）。数据源 `web/documents-data.js` 由 `python scripts/build-chinese-docs.py` 生成——改 docs 后必须重跑。
+- **文档中心 `/docs`**：12 份中文文档，搜索/分类/hash 路由/.md 下载（BOM）。数据源 `web/documents-data.js` 由 `python scripts/build-chinese-docs.py` 生成——改 docs 后必须重跑。
 - **确认计划 `/plan`**：纯离线（不发任何 API 请求），47 个范围项（已完成/部分完成/未完成），依赖检查告警，导出 `samho-确认执行计划-YYYY-MM-DD.txt`（UTF-8 BOM）。勾选只是范围选择，回传完整文本才执行。
 
 ## 九、测试与端口策略
 
-- 135 项 Rust 测试（CLI 38、core 单元 19、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9）+ 13 项 Node 网页契约。
+- 155 项 Rust 测试（CLI 46、core 单元 31、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9）+ 21 项 Node 网页契约。
 - **测试端口策略**：所有测试/fixture/OAuth 回调/浏览器/smoke 只用 **300–400**（Rust `test_support::bind_loopback()` 实际 301–399）；生产端口不限。
 - 集成测试全部使用本地 fixture（axum/Python stdio MCP/faux provider），零真实模型调用、零付费。
 - 已知未验收：真实供应商质量、官方 MCP conformance、macOS/Linux 实机、24h soak、同机 Pi/Rust 性能对照。

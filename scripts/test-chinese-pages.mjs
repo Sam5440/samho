@@ -31,13 +31,13 @@ test('工作台、文档页和确认计划页声明中文语言并提供中文�
   }
 });
 
-test('中文资料包包含 13 份文档且每份具有中文元数据', () => {
+test('中文资料包包含 12 份文档且每份具有中文元数据', () => {
   const source = read('web/documents-data.js');
   const sandbox = { window: {} };
   vm.runInNewContext(source, sandbox, { filename: 'web/documents-data.js' });
   const docs = sandbox.window.SamhoDocuments;
   assert.ok(Array.isArray(docs));
-  assert.equal(docs.length, 13);
+  assert.equal(docs.length, 12);
   const ids = new Set();
   for (const doc of docs) {
     assert.ok(doc && typeof doc === 'object');

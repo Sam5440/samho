@@ -141,7 +141,7 @@
 | `PATCH /api/sessions/{id}` `{title?, archived?}` | server.rs | 校验 title 非空 ≤200 字符 |
 | `DELETE /api/sessions/{id}` | server.rs | 级联 fork 后代，409 保护运行中会话 |
 | 静态资源白名单 | server.rs | `/ui/tokens.css` `/ui/base.css` `/ui/components.css` `/app.css` `/js/*.js`（含 mime 表），保留 `/docs` `/plan` 资源 |
-| 删除旧 `/style.css` `/app.js` `/chinese.css` 路由 | server.rs | index.html 不再引用 |
+| 删除旧 `/style.css` `/app.js` `/chinese.css` 路由与文件（已完成） | server.rs / web/ | index.html 不再引用，文件已移除 |
 
 不改动执行循环与事件 schema（轨迹内容受 `log_content` 开关控制——关闭时轨迹 CallCard 显示元数据 + omitted 提示，主时间线始终用持久化会话消息渲染完整工具调用）。
 
@@ -203,4 +203,4 @@ web/
 ### 5. 测试计划
 
 - **cargo**：session.rs 新增 rename/archived/delete_cascade 单元测试（含 fork 级联、运行中拒绝、journal 重放一致性）；server.rs 新路由契约测试（PATCH/DELETE/静态资源/CSP 下无 style 属性依赖）。
-- **GUI（浏览器）**：`samho serve` + 真实模型，逐项验收：新建/发送/续聊、工具卡三态、思考折叠、轨迹面板（CallCard/搜索/展开）、会话重命名/归档/删除、模型选择、主题切换、快捷键；截图存 `reports/frontend-refactor/`。
+- **GUI（浏览器）**：`samho serve` + 真实模型，逐项验收：新建/发送/续聊、工具卡三态、思考折叠、轨迹面板（CallCard/搜索/展开）、会话重命名/归档/删除、模型选择、主题切换、快捷键（分析期截图产物已清理）。
