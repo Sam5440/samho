@@ -1,0 +1,1 @@
+{"prompt": "用 grep 在 crates 目录搜索 fn run_with_task_id，报告出现在哪些文件；然后读取所在文件的前 30 行；再读取 Cargo.toml 的 workspace 段。用中文简要说明。"}

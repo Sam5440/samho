@@ -1,0 +1,40 @@
+# 演示专用配置：独立 data_dir + 7433 端口，避免占用主实例（reports/ 三份报告的复现入口）
+display_name = "Samho"
+workspace = "D:/ddcode/rpi"
+data_dir = "D:/ddcode/rpi/reports/demo-data"
+http_bind = "127.0.0.1:7433"
+max_turns = 40
+max_concurrent_tasks = 4
+request_timeout_ms = 600000
+streaming = true
+log_content = true
+
+[tools]
+shell_timeout_ms = 120000
+
+[retry]
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 8000
+reroute = true
+
+[budget]
+max_task_tokens = 4000000
+
+[[models]]
+id = "deepseek-v4.1-flash"
+model = "wuyou/deepseek-v4.1-flash"
+provider = "chat_completions"
+tier = "reasoning"
+base_url = "http://127.0.0.1:3425/v1"
+api_key_env = "SAMHO_API_KEY"
+context_window = 272000
+max_output_tokens = 32768
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+streaming = true
+output_token_parameter = "max_tokens"
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+latency_ms = 3000

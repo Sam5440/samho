@@ -1,0 +1,876 @@
+{
+  "generated_at": "2026-11-14 13:41:33",
+  "session_count": 17,
+  "sessions": [
+    {
+      "id": "8f7ea2be",
+      "title": "请阅读 README.md 的开头部分，然后用中文总结 Samho 项目的定位、核心",
+      "status": "done",
+      "messages": 5,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 18.2,
+      "created": "12:58:56",
+      "tool_results": 1,
+      "events": 9
+    },
+    {
+      "id": "e27b27f9",
+      "title": "在 examples 目录创建 hello-samho.html：单文件网页，深色卡",
+      "status": "done",
+      "messages": 21,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 51.4,
+      "created": "13:00:39",
+      "tool_results": 10,
+      "events": 41
+    },
+    {
+      "id": "673e4b2b",
+      "title": "请阅读 docs/architecture.md 全文，用中文写一份 300 字左右",
+      "status": "done",
+      "messages": 24,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 79.3,
+      "created": "13:02:43",
+      "tool_results": 11,
+      "events": 47
+    },
+    {
+      "id": "a0265403",
+      "title": "用 shell 工具执行 PowerShell 命令：统计 crates 目录下 .",
+      "status": "done",
+      "messages": 9,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 34.1,
+      "created": "13:04:53",
+      "tool_results": 3,
+      "events": 17
+    },
+    {
+      "id": "9c39f362",
+      "title": "依次执行：1) 用 list_files 列出 crates 目录第一层；2) 读取",
+      "status": "done",
+      "messages": 9,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 13.9,
+      "created": "13:06:46",
+      "tool_results": 3,
+      "events": 17
+    },
+    {
+      "id": "3d5d9a7f",
+      "title": "请执行两次 shell 命令：第一次输出当前 PowerShell 的 PSVers",
+      "status": "done",
+      "messages": 6,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 40.8,
+      "created": "13:08:03",
+      "tool_results": 2,
+      "events": 11
+    },
+    {
+      "id": "c7abf1ae",
+      "title": "第一步用 list_files 列出 docs 目录第一层；第二步读取 docs/a",
+      "status": "done",
+      "messages": 23,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 239.1,
+      "created": "13:09:04",
+      "tool_results": 8,
+      "events": 45
+    },
+    {
+      "id": "a8e7a64c",
+      "title": "读取 README.md 第 1-60 行、docs/architecture.md",
+      "status": "done",
+      "messages": 7,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 22.7,
+      "created": "13:11:36",
+      "tool_results": 3,
+      "events": 13
+    },
+    {
+      "id": "514cb0f0",
+      "title": "用 grep 在 crates 目录搜索 fn run_with_task_id，报",
+      "status": "done",
+      "messages": 9,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 14.7,
+      "created": "13:11:36",
+      "tool_results": 4,
+      "events": 17
+    },
+    {
+      "id": "4c02a575",
+      "title": "用 list_files 列出 crates/samho-core/src 第一层文",
+      "status": "done",
+      "messages": 8,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 11.9,
+      "created": "13:11:36",
+      "tool_results": 3,
+      "events": 15
+    },
+    {
+      "id": "b5f7ae54",
+      "title": "阅读 docs/中文使用说明.md 的前 40 行，用中文列出这份文档涵盖的主要章节",
+      "status": "done",
+      "messages": 5,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 12.6,
+      "created": "13:27:06",
+      "tool_results": 1,
+      "events": 9
+    },
+    {
+      "id": "b77041ef",
+      "title": "用 grep 在 crates 目录搜索 fn run_with_task_id，报",
+      "status": "done",
+      "messages": 8,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 13.0,
+      "created": "13:27:20",
+      "tool_results": 3,
+      "events": 15
+    },
+    {
+      "id": "50462751",
+      "title": "读取 README.md 第 1-60 行、docs/architecture.md",
+      "status": "done",
+      "messages": 7,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 12.2,
+      "created": "13:27:20",
+      "tool_results": 3,
+      "events": 13
+    },
+    {
+      "id": "8193d6e7",
+      "title": "用 list_files 列出 crates/samho-core/src 第一层文",
+      "status": "done",
+      "messages": 7,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 10.3,
+      "created": "13:27:20",
+      "tool_results": 3,
+      "events": 13
+    },
+    {
+      "id": "115ffa89",
+      "title": "用 grep 在 crates 目录搜索 fn run_with_task_id，报",
+      "status": "done",
+      "messages": 9,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 15.3,
+      "created": "13:28:01",
+      "tool_results": 4,
+      "events": 17
+    },
+    {
+      "id": "0eeb6566",
+      "title": "依次读取 README.md 第 1-50 行、LICENSE 前 5 行、exam",
+      "status": "done",
+      "messages": 7,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 11.8,
+      "created": "13:28:01",
+      "tool_results": 3,
+      "events": 13
+    },
+    {
+      "id": "3d8b20fe",
+      "title": "第一步用 list_files 列出 docs 目录；第二步读取 docs/arch",
+      "status": "done",
+      "messages": 7,
+      "model": "deepseek-v4.1-flash",
+      "duration_s": 11.6,
+      "created": "13:28:01",
+      "tool_results": 3,
+      "events": 13
+    }
+  ],
+  "tasks": [
+    {
+      "id": "ff3c6722",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "cfcf6e41",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "a92b845c",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "726b2677",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "413e5216",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "3a6e6d7a",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    },
+    {
+      "id": "1ce353d3",
+      "session": "",
+      "status": "completed",
+      "has_error": false
+    }
+  ],
+  "task_status_counter": {
+    "completed": 7
+  },
+  "event_count": 325,
+  "event_kinds": {
+    "task.start": 17,
+    "model.route": 17,
+    "model.start": 56,
+    "model.response": 56,
+    "tool.start": 68,
+    "tool.result": 68,
+    "task.done": 17,
+    "task.control.queued": 13,
+    "task.control.applied": 13
+  },
+  "tool_calls_total": 68,
+  "tool_calls_by_name": {
+    "read_file": 37,
+    "list_files": 10,
+    "glob": 2,
+    "write_file": 3,
+    "edit_file": 2,
+    "shell": 9,
+    "grep": 5
+  },
+  "tool_errors_by_name": {
+    "shell": 2
+  },
+  "tool_latency_stats": {
+    "read_file": {
+      "n": 37,
+      "p50": 5,
+      "max": 14,
+      "sum_ms": 196
+    },
+    "list_files": {
+      "n": 10,
+      "p50": 5,
+      "max": 7,
+      "sum_ms": 49
+    },
+    "glob": {
+      "n": 2,
+      "p50": 8,
+      "max": 8,
+      "sum_ms": 16
+    },
+    "write_file": {
+      "n": 3,
+      "p50": 8,
+      "max": 9,
+      "sum_ms": 23
+    },
+    "edit_file": {
+      "n": 2,
+      "p50": 9,
+      "max": 9,
+      "sum_ms": 17
+    },
+    "shell": {
+      "n": 9,
+      "p50": 717,
+      "max": 1112,
+      "sum_ms": 6313
+    },
+    "grep": {
+      "n": 5,
+      "p50": 10,
+      "max": 36,
+      "sum_ms": 71
+    }
+  },
+  "budget_entries": 112,
+  "budget_last": {
+    "usd": 0.0,
+    "tokens": 236676
+  },
+  "budget_curve": [
+    {
+      "ts": 0,
+      "tokens": 70866,
+      "usd": 0.0
+    },
+    {
+      "ts": 1,
+      "tokens": 1639,
+      "usd": 0.0
+    },
+    {
+      "ts": 2,
+      "tokens": 82955,
+      "usd": 0.0
+    },
+    {
+      "ts": 3,
+      "tokens": 8008,
+      "usd": 0.0
+    },
+    {
+      "ts": 4,
+      "tokens": 78969,
+      "usd": 0.0
+    },
+    {
+      "ts": 5,
+      "tokens": 9743,
+      "usd": 0.0
+    },
+    {
+      "ts": 6,
+      "tokens": 86472,
+      "usd": 0.0
+    },
+    {
+      "ts": 7,
+      "tokens": 14435,
+      "usd": 0.0
+    },
+    {
+      "ts": 8,
+      "tokens": 96586,
+      "usd": 0.0
+    },
+    {
+      "ts": 9,
+      "tokens": 20326,
+      "usd": 0.0
+    },
+    {
+      "ts": 10,
+      "tokens": 107079,
+      "usd": 0.0
+    },
+    {
+      "ts": 11,
+      "tokens": 26872,
+      "usd": 0.0
+    },
+    {
+      "ts": 12,
+      "tokens": 120934,
+      "usd": 0.0
+    },
+    {
+      "ts": 13,
+      "tokens": 35714,
+      "usd": 0.0
+    },
+    {
+      "ts": 14,
+      "tokens": 132753,
+      "usd": 0.0
+    },
+    {
+      "ts": 15,
+      "tokens": 44802,
+      "usd": 0.0
+    },
+    {
+      "ts": 16,
+      "tokens": 143621,
+      "usd": 0.0
+    },
+    {
+      "ts": 17,
+      "tokens": 54532,
+      "usd": 0.0
+    },
+    {
+      "ts": 18,
+      "tokens": 125404,
+      "usd": 0.0
+    },
+    {
+      "ts": 19,
+      "tokens": 56152,
+      "usd": 0.0
+    },
+    {
+      "ts": 20,
+      "tokens": 135822,
+      "usd": 0.0
+    },
+    {
+      "ts": 21,
+      "tokens": 61214,
+      "usd": 0.0
+    },
+    {
+      "ts": 22,
+      "tokens": 146807,
+      "usd": 0.0
+    },
+    {
+      "ts": 23,
+      "tokens": 66656,
+      "usd": 0.0
+    },
+    {
+      "ts": 24,
+      "tokens": 156920,
+      "usd": 0.0
+    },
+    {
+      "ts": 25,
+      "tokens": 73724,
+      "usd": 0.0
+    },
+    {
+      "ts": 26,
+      "tokens": 166480,
+      "usd": 0.0
+    },
+    {
+      "ts": 27,
+      "tokens": 80875,
+      "usd": 0.0
+    },
+    {
+      "ts": 28,
+      "tokens": 177603,
+      "usd": 0.0
+    },
+    {
+      "ts": 29,
+      "tokens": 89262,
+      "usd": 0.0
+    },
+    {
+      "ts": 30,
+      "tokens": 189770,
+      "usd": 0.0
+    },
+    {
+      "ts": 31,
+      "tokens": 98896,
+      "usd": 0.0
+    },
+    {
+      "ts": 32,
+      "tokens": 201202,
+      "usd": 0.0
+    },
+    {
+      "ts": 33,
+      "tokens": 108623,
+      "usd": 0.0
+    },
+    {
+      "ts": 34,
+      "tokens": 211450,
+      "usd": 0.0
+    },
+    {
+      "ts": 35,
+      "tokens": 120575,
+      "usd": 0.0
+    },
+    {
+      "ts": 36,
+      "tokens": 191570,
+      "usd": 0.0
+    },
+    {
+      "ts": 37,
+      "tokens": 122277,
+      "usd": 0.0
+    },
+    {
+      "ts": 38,
+      "tokens": 194552,
+      "usd": 0.0
+    },
+    {
+      "ts": 39,
+      "tokens": 124293,
+      "usd": 0.0
+    },
+    {
+      "ts": 40,
+      "tokens": 198982,
+      "usd": 0.0
+    },
+    {
+      "ts": 41,
+      "tokens": 127207,
+      "usd": 0.0
+    },
+    {
+      "ts": 42,
+      "tokens": 198182,
+      "usd": 0.0
+    },
+    {
+      "ts": 43,
+      "tokens": 128887,
+      "usd": 0.0
+    },
+    {
+      "ts": 44,
+      "tokens": 200370,
+      "usd": 0.0
+    },
+    {
+      "ts": 45,
+      "tokens": 130699,
+      "usd": 0.0
+    },
+    {
+      "ts": 46,
+      "tokens": 203683,
+      "usd": 0.0
+    },
+    {
+      "ts": 47,
+      "tokens": 132867,
+      "usd": 0.0
+    },
+    {
+      "ts": 48,
+      "tokens": 207421,
+      "usd": 0.0
+    },
+    {
+      "ts": 49,
+      "tokens": 135661,
+      "usd": 0.0
+    },
+    {
+      "ts": 50,
+      "tokens": 206623,
+      "usd": 0.0
+    },
+    {
+      "ts": 51,
+      "tokens": 137439,
+      "usd": 0.0
+    },
+    {
+      "ts": 52,
+      "tokens": 209826,
+      "usd": 0.0
+    },
+    {
+      "ts": 53,
+      "tokens": 139658,
+      "usd": 0.0
+    },
+    {
+      "ts": 54,
+      "tokens": 210591,
+      "usd": 0.0
+    },
+    {
+      "ts": 55,
+      "tokens": 141310,
+      "usd": 0.0
+    },
+    {
+      "ts": 56,
+      "tokens": 214046,
+      "usd": 0.0
+    },
+    {
+      "ts": 57,
+      "tokens": 143463,
+      "usd": 0.0
+    },
+    {
+      "ts": 58,
+      "tokens": 224996,
+      "usd": 0.0
+    },
+    {
+      "ts": 59,
+      "tokens": 148038,
+      "usd": 0.0
+    },
+    {
+      "ts": 60,
+      "tokens": 234555,
+      "usd": 0.0
+    },
+    {
+      "ts": 61,
+      "tokens": 153865,
+      "usd": 0.0
+    },
+    {
+      "ts": 62,
+      "tokens": 245432,
+      "usd": 0.0
+    },
+    {
+      "ts": 63,
+      "tokens": 316358,
+      "usd": 0.0
+    },
+    {
+      "ts": 64,
+      "tokens": 387279,
+      "usd": 0.0
+    },
+    {
+      "ts": 65,
+      "tokens": 458168,
+      "usd": 0.0
+    },
+    {
+      "ts": 66,
+      "tokens": 389030,
+      "usd": 0.0
+    },
+    {
+      "ts": 67,
+      "tokens": 470367,
+      "usd": 0.0
+    },
+    {
+      "ts": 68,
+      "tokens": 401096,
+      "usd": 0.0
+    },
+    {
+      "ts": 69,
+      "tokens": 473538,
+      "usd": 0.0
+    },
+    {
+      "ts": 70,
+      "tokens": 404316,
+      "usd": 0.0
+    },
+    {
+      "ts": 71,
+      "tokens": 481135,
+      "usd": 0.0
+    },
+    {
+      "ts": 72,
+      "tokens": 410799,
+      "usd": 0.0
+    },
+    {
+      "ts": 73,
+      "tokens": 487181,
+      "usd": 0.0
+    },
+    {
+      "ts": 74,
+      "tokens": 413648,
+      "usd": 0.0
+    },
+    {
+      "ts": 75,
+      "tokens": 494159,
+      "usd": 0.0
+    },
+    {
+      "ts": 76,
+      "tokens": 421436,
+      "usd": 0.0
+    },
+    {
+      "ts": 77,
+      "tokens": 345895,
+      "usd": 0.0
+    },
+    {
+      "ts": 78,
+      "tokens": 272250,
+      "usd": 0.0
+    },
+    {
+      "ts": 79,
+      "tokens": 189425,
+      "usd": 0.0
+    },
+    {
+      "ts": 80,
+      "tokens": 260704,
+      "usd": 0.0
+    },
+    {
+      "ts": 81,
+      "tokens": 191189,
+      "usd": 0.0
+    },
+    {
+      "ts": 82,
+      "tokens": 265543,
+      "usd": 0.0
+    },
+    {
+      "ts": 83,
+      "tokens": 194059,
+      "usd": 0.0
+    },
+    {
+      "ts": 84,
+      "tokens": 265414,
+      "usd": 0.0
+    },
+    {
+      "ts": 85,
+      "tokens": 336764,
+      "usd": 0.0
+    },
+    {
+      "ts": 86,
+      "tokens": 408082,
+      "usd": 0.0
+    },
+    {
+      "ts": 87,
+      "tokens": 338622,
+      "usd": 0.0
+    },
+    {
+      "ts": 88,
+      "tokens": 415416,
+      "usd": 0.0
+    },
+    {
+      "ts": 89,
+      "tokens": 345878,
+      "usd": 0.0
+    },
+    {
+      "ts": 90,
+      "tokens": 419558,
+      "usd": 0.0
+    },
+    {
+      "ts": 91,
+      "tokens": 350116,
+      "usd": 0.0
+    },
+    {
+      "ts": 92,
+      "tokens": 431870,
+      "usd": 0.0
+    },
+    {
+      "ts": 93,
+      "tokens": 360662,
+      "usd": 0.0
+    },
+    {
+      "ts": 94,
+      "tokens": 436217,
+      "usd": 0.0
+    },
+    {
+      "ts": 95,
+      "tokens": 363203,
+      "usd": 0.0
+    },
+    {
+      "ts": 96,
+      "tokens": 286170,
+      "usd": 0.0
+    },
+    {
+      "ts": 97,
+      "tokens": 214286,
+      "usd": 0.0
+    },
+    {
+      "ts": 98,
+      "tokens": 285622,
+      "usd": 0.0
+    },
+    {
+      "ts": 99,
+      "tokens": 356950,
+      "usd": 0.0
+    },
+    {
+      "ts": 100,
+      "tokens": 428245,
+      "usd": 0.0
+    },
+    {
+      "ts": 101,
+      "tokens": 358750,
+      "usd": 0.0
+    },
+    {
+      "ts": 102,
+      "tokens": 436024,
+      "usd": 0.0
+    },
+    {
+      "ts": 103,
+      "tokens": 366545,
+      "usd": 0.0
+    },
+    {
+      "ts": 104,
+      "tokens": 443805,
+      "usd": 0.0
+    },
+    {
+      "ts": 105,
+      "tokens": 374529,
+      "usd": 0.0
+    },
+    {
+      "ts": 106,
+      "tokens": 452710,
+      "usd": 0.0
+    },
+    {
+      "ts": 107,
+      "tokens": 378894,
+      "usd": 0.0
+    },
+    {
+      "ts": 108,
+      "tokens": 459042,
+      "usd": 0.0
+    },
+    {
+      "ts": 109,
+      "tokens": 385845,
+      "usd": 0.0
+    },
+    {
+      "ts": 110,
+      "tokens": 311867,
+      "usd": 0.0
+    },
+    {
+      "ts": 111,
+      "tokens": 236676,
+      "usd": 0.0
+    }
+  ]
+}

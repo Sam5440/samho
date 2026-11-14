@@ -1,0 +1,1 @@
+{"prompt": "用 list_files 列出 crates/samho-core/src 第一层文件，然后读取 agent.rs 前 50 行，再读取 session.rs 前 40 行，最后用中文概括这两个模块的职责（120 字内）。"}

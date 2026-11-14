@@ -1,9 +1,30 @@
 /target/
 /.samho/
 /upstream/
-# 验证报告为本机生成产物，不入库（保留 .gitkeep 维持目录）
+# reports/ 默认整体忽略，白名单放行三份图文报告的成品与生成管线
 /reports/*
 !/reports/.gitkeep
+!/reports/collect_stats.py
+!/reports/make_charts.py
+!/reports/demo-config.toml
+!/reports/payload-t1.json
+!/reports/payload-t2.json
+!/reports/payload-t3.json
+!/reports/stats.json
+!/reports/shots/
+!/reports/charts/
+!/reports/docgen/
+!/reports/out/
+!/reports/demo-data/
+# 白名单内仍排除的中间物与大体积产物（本机工具/依赖/渲染中间页）
+/reports/docgen/node_modules/
+/reports/out/pages/
+/reports/out/pdf/
+/reports/shots/full/
+/reports/demo-data/*
+!/reports/demo-data/events.jsonl
+!/reports/demo-data/sessions.jsonl
+!/reports/demo-data/budget.jsonl
 __pycache__/
 *.pyc
 *.log
