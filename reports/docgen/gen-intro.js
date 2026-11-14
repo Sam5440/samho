@@ -10,7 +10,7 @@ const body = [];
 
 // ── 1 项目概述 ──
 body.push(H.h1("一、项目概述"));
-body.push(H.p("Samho 是 Pi coding agent 的 Rust 重写工程。项目在完整下载并分析上游仓库（Pi、DSH、ZCode 等参考实现）之后，采取「增量重写」的交付策略：不是一次性翻译上游全部功能，而是把已经验证过的核心链路逐块用 Rust 重建，每一步都保持可运行、可测试、可复盘。当前版本已经交付四大件：Rust 运行时核心（samho-core）、共享本地服务（HTTP + SSE）、Ratatui 终端界面（TUI）和本地 Web 图形工作台（React 工作台）。尚未完成的能力仍按实现状态文档保留边界，不做超出证据的宣称。"));
+body.push(H.p("Samho 是一个本地优先的 Agent 运行时工程。项目采取「增量交付」的策略：每一步都保持可运行、可测试、可复盘，把运行时核心链路逐块用 Rust 重建并配套行为测试。当前版本已经交付四大件：Rust 运行时核心（samho-core）、共享本地服务（HTTP + SSE）、Ratatui 终端界面（TUI）和本地 Web 图形工作台（React 工作台）。尚未完成的能力仍按实现状态文档保留边界，不做超出证据的宣称。"));
 body.push(H.p("把这套系统说清楚，可以概括成一句话：它把「会话、任务、模型、工具、技能、MCP 服务」全部纳入统一的 Object 注册表管理，用异步 Agent 循环驱动任务执行，用六级模型策略按任务复杂度自动分配模型，用 JSONL 日志把每一次调用轨迹完整落盘，再通过 Web 工作台与 TUI 两种界面共用同一个 Rust 服务对外呈现。"));
 body.push(H.p("项目仓库位于 D:/ddcode/rpi，构建产物与演示环境彼此隔离：正式服务默认绑定 0.0.0.0:7432，本报告中的截图与运行数据来自独立数据目录与 127.0.0.1:7433 的演示实例，不污染主实例数据。"));
 body.push(...H.figure(S("30-workbench-home-new.png"), "Samho Web 工作台首页：左侧项目与会话列表，中间对话区，右侧设备面板"));
@@ -48,7 +48,7 @@ body.push(...H.tbl({
     ["crates/samho-cli", "命令行入口：serve（HTTP/SSE 服务）、tui（终端界面）、run/inspect/replay（CLI 运行与复盘）、config"],
     ["web/app", "React + TypeScript 工作台源码（Vite 8 构建）"],
     ["web/dist", "构建产物，经 include_str! 内嵌进二进制（共 6 个静态资源）"],
-    ["docs/", "架构、自定义配置、实现状态、上游分析等 17 份中英文文档"],
+    ["docs/", "架构、自定义配置、实现状态、验证计划等 11 份中英文文档"],
     ["scripts/", "验收与基准脚本：smoke_runtime.py、smoke-web.ps1、benchmark-runtime.ps1 等"],
     ["examples/", "真实 Provider 配置模板（samho.deepseek.toml、samho.chat.toml）"],
   ],
@@ -132,24 +132,12 @@ body.push(...H.bullets([
   "文件面板与内置文件工具都会拒绝符号链接目标与越界路径；Git 面板操作有超时与输出上限",
   "log_content = false 仅省略轨迹正文；会话恢复仍保存经脱敏的完整消息",
   "trace replay 是事件查看/导出，不会重执行外部副作用",
-  "完整 MCP 官方 conformance、真实供应商质量、跨平台实机、24 小时 soak 与 Pi/Rust 同机性能对照尚未验收；这些限制不能由本地模拟器结果推断",
+  "完整 MCP 官方 conformance、真实供应商质量、跨平台实机与 24 小时 soak 尚未验收；这些限制不能由本地模拟器结果推断",
   "性能比较必须同 commit、同构建条件、同工作负载；本地基准脚本为 scripts/benchmark-runtime.ps1",
 ]));
 
 // ── 附录 ──
-body.push(H.h1("附录：上游参考与文档索引"));
-body.push(H.p("上游参考仓库（pi/dsh/opencode/zcode）是分析期临时 clone，未入库，固定提交记录保留在 docs/upstream-lock.json。源码证据与重写设计文档如下。"));
-body.push(...H.tbl({
-  caption: "上游参考固定提交",
-  headers: ["项目", "固定提交"],
-  widths: [45, 55],
-  rows: [
-    ["Pi（earendil-works/pi）", "2db5e359bf84c1c0be51d2c5c5c5c7cf27072c2b"],
-    ["DSH（deepseek-ai/deepseek-harness）", "5badb15009ae1756c3afe0ae0cef1faafc290ccc"],
-    ["ZCode（zai-org/ZCode）", "29628c9acdb81b703bbd4080c207a0e7ce5e276e"],
-  ],
-  small: true,
-}));
+body.push(H.h1("附录：文档索引"));
 body.push(...H.tbl({
   caption: "中文文档索引",
   headers: ["文档", "内容"],
@@ -161,8 +149,6 @@ body.push(...H.tbl({
     ["实现状态 implementation-status.md", "当前能力边界与后续阶段"],
     ["MCP 支持矩阵 mcp-support.md", "stdio/HTTP 双通道能力清单"],
     ["多场景验证计划 validation-plan.md", "M01-M10 评测计划"],
-    ["Pi 全面分析 pi-analysis.md", "上游模型/Agent/工具/持久化/性能热路径分析"],
-    ["DSH/ZCode 参考分析 reference-analysis.md", "上游插件与 Object 设计对比"],
   ],
   small: true,
 }));
@@ -171,7 +157,7 @@ body.push(...H.tbl({
 const doc = H.buildDoc({
   coverConfig: {
     title: "Samho 项目完整介绍",
-    subtitle: "Pi coding agent 的 Rust 增量重写工程 · 图文版",
+    subtitle: "本地优先 Agent 运行时工程 · 图文版",
     englishLabel: "SAMHO PROJECT OVERVIEW",
     metaLines: [
       "文档日期：2026 年 11 月 14 日",

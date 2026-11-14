@@ -750,7 +750,7 @@ impl Object for ShellTool {
         )
     }
 }
-/// 参照 OpenCode/ZCode/Pi/omp 默认工具集补齐的内置工具常量。
+/// 内置工具的限额常量：编辑文件大小、网页抓取字节数/重定向/超时与 todo 列表容量。
 const EDIT_MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
 const WEBFETCH_MAX_BYTES_DEFAULT: usize = 128 * 1024;
 const WEBFETCH_MAX_BYTES_CAP: usize = 1024 * 1024;

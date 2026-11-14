@@ -68,7 +68,7 @@ npm --prefix web/app run build
 
 ## 2. 项目定位与硬边界
 
-Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写**：保留 Agent 循环、流式输出、工具调用、会话树、MCP、Skill 等执行语义，并加入自有设计：
+Samho 是一个**本地优先的 Agent 运行时**：以 Rust 从零实现 Agent 循环、流式输出、工具调用、会话树、MCP、Skill 等执行语义，并围绕运行时实体管理做了自有设计：
 
 - 统一 **Object** 身份、依赖拓扑、scope、lease 与热替换。
 - 六级模型路由（nano / fast / balanced / reasoning / frontier / specialist）+ 可配置评分。
@@ -81,12 +81,9 @@ Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写**：保留 Agen
 
 **明确不是**：
 
-- 不是 Pi 的功能完全对等实现；未列在测试矩阵里的上游行为不要假设已支持。
 - 不是操作系统沙箱。`shell` 以服务进程的 OS 用户权限执行；`write` 只限制在 workspace 内，但不隔离进程。
 - 不是多租户服务。无认证、无 CORS、无按用户授权；Host/Origin 检查只用于本地/局域网边界。
 - 不提供真实模型质量结论。所有集成测试使用 Demo、trait provider 与本地 HTTP/stdio/Python fixture。
-
-**命名沿革**：项目原名 RPi，2026-11-11 全量更名为 Samho（crate、二进制、环境变量、数据目录、网页）。**工作目录仍是 `D:\ddcode\rpi`**，这是历史路径，不是遗留代码。旧 `RPI_*` 环境变量、`rpi-*` crate、`/.rpi/` 数据目录均已不存在。
 
 **版本信息**：
 
@@ -105,7 +102,7 @@ Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写**：保留 Agen
 ## 3. 仓库地图与运行期数据
 
 ```text
-D:\ddcode\rpi\
+samho/                            # 仓库根
 ├── Cargo.toml                      # workspace: crates/samho-core + crates/samho-cli
 ├── Cargo.lock
 ├── agent.md                        # 本文件（权威工程参考）
@@ -151,7 +148,7 @@ D:\ddcode\rpi\
 │   │   └── src/lib/                # api、store（zustand）、controller、projection、markdown
 │   ├── dist/                       # Vite 构建产物（固定文件名，提交进仓库）
 │   └── vendor/xterm*.{js,css}      # 终端惰性加载
-├── docs/                           # 14 份 Markdown + upstream-lock.json
+├── docs/                           # 11 份 Markdown
 ├── examples/
 │   ├── samho.chat.toml             # OpenAI 兼容 Provider 模板
 │   └── samho.anthropic.toml        # Anthropic Messages 网关完整示例
@@ -1362,10 +1359,9 @@ node --test scripts/test-workbench-contracts.mjs
 ### 14.1 文档清单
 
 - 开始使用：`docs/中文使用说明.md`、`README.md`
-- 上游分析：`docs/pi-analysis.md`、`docs/reference-analysis.md`
 - 实现设计：`docs/architecture.md`、`docs/customization.md`、`docs/mcp-support.md`、`docs/implementation-status.md`、`docs/remote-facets.md`
 - 验证与交付：`docs/validation-plan.md`、`docs/test-port-policy.md`
-- 其他：`docs/frontend-refactor-analysis.md`、`docs/installation-tui.md`、`docs/provider-streaming.md`、`docs/storage-lifecycle.md`
+- 其他：`docs/installation-tui.md`、`docs/provider-streaming.md`、`docs/storage-lifecycle.md`
 
 ### 14.3 权威顺序
 
@@ -1373,8 +1369,6 @@ node --test scripts/test-workbench-contracts.mjs
 2. `agent.md`（本文件）。
 3. `README.md` 与 `docs/implementation-status.md`（状态与边界）。
 4. 其余设计文档（可能滞后，读时对照源码）。
-
-`docs/upstream-lock.json` 固定 Pi/DSH/ZCode 的分析 commit；`upstream/` 已清理，需要时按 lock 重新 clone，不要恢复进仓库。
 
 ### 14.4 `CLAUDE.md` 的说明
 
@@ -1405,10 +1399,10 @@ mklink CLAUDE.md agent.md
 - 真实模型 10 项任务验收中发现并修复：`write_file` 无法一次创建多级新目录（`within_workspace` 只检查直接父目录）；Windows `shell` 输出 GBK 乱码且模型误用 bash 语法（改 UTF-8 包装 + PowerShell 方言说明）；`read_file` 拒绝 PowerShell 重定向产生的 UTF-16 文件；工具结果路径带 `\\?\` 前缀与反斜杠。
 - Web 工作台重写为 React + TypeScript + Vite + Tailwind v4 + shadcn/ui（`web/app` → `web/dist`），移除旧版原生 ES Module UI（`web/index.html`、`web/app.css`、`web/ui/`、`web/js/`）；功能与 API 调用保持一致，顺带修复旧版文件删除与会话删除报错。
 
-- 全量更名 RPi → Samho：crate、二进制、环境变量、数据目录、页面文案；工作目录仍是 `D:\ddcode\rpi`。
+- 全量统一命名为 Samho：crate、二进制、环境变量、数据目录、页面文案。
 - 默认监听改为 `0.0.0.0:7432`，启动日志与顶栏显示局域网地址；保留 Host/Origin 防护与无认证警告。
 - 新增 Anthropic Messages Provider（`anthropic.rs` + 示例配置 + 测试）。
 - 新增项目制工作区：项目/文件夹/会话树、会话附属终端/浏览器、默认项目迁移。
 - 新增动态工作区（`hub.rs`）、任务类型 → 模型角色（`roles.rs`）、任务索引字节预算。
-- 清理旧版 UI、历史报告、上游参考仓库与 43 GB 构建缓存；仓库体积约 45 GB → 7.8 GB。
+- 清理旧版 UI、历史报告与 43 GB 构建缓存；仓库体积约 45 GB → 7.8 GB。
 - 当前基线：155 项 Rust 测试 + 21 项 Node 契约全部通过；release 冒烟 5/5；静态/API 路由验证通过。

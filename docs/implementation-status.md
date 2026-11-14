@@ -25,11 +25,11 @@
 
 - 真实供应商凭据、真实模型质量和成本：未运行；Chat Completions 协议仅以本地 fixture 验证。
 - macOS/Linux 的实际构建、TUI 像素/终端差异和跨平台安装：CI workflow 已提交但本地未运行，Windows release smoke 有记录。
-- 上游 Pi 全量测试：仅保留既有选择性结果；Windows TUI 的 symlink/path 差异和根 npm PATH 失败仍按原报告记录。
-- 24 小时 soak、同机等价 Pi/Rust p50/p95/RSS 对照：已有模拟器样本和方法，尚未形成可宣称的相对倍率。
+- Windows TUI 的 symlink/path 差异和根 npm PATH 失败：仅保留既有选择性测试结果，按原报告记录。
+- 24 小时 soak、跨版本 p50/p95/RSS 长期对照：已有模拟器样本和方法，尚未形成可宣称的相对倍率。
 - MCP OAuth metadata discovery、动态 client registration、modern subscriptions/listen、automatic stdio reconnect、外部 JSON Schema ref 等能力仍明确列在 not_implemented。
 - Remote Facet 当前是受认证和 allowlist 保护的 HTTP 客户端；没有宣称任意远程 Object 执行、进程隔离或生产级远程认证。
 
 ## 证据和回滚原则
 
-每个失败保留原始输出和 trace；展示式复盘不会重新执行工具。崩溃或取消后，已发出的外部副作用标为未知，恢复只补 tool observation，不自动重跑。性能报告必须使用同机、同输入、同配置的样本，不从单次结果推导相对 Pi 倍率。
+每个失败保留原始输出和 trace；展示式复盘不会重新执行工具。崩溃或取消后，已发出的外部副作用标为未知，恢复只补 tool observation，不自动重跑。性能报告必须使用同机、同输入、同配置的样本，不从单次结果推导相对倍率。

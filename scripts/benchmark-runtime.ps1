@@ -203,7 +203,6 @@ finally {
         binary_bytes = (Get-Item -LiteralPath $BinaryPath).Length
         workspace_commit = Get-ToolOutput "git" @("-C", $repoRoot, "rev-parse", "HEAD")
         workspace_dirty_files = $dirtyCount
-        upstream_pi_commit = Get-ToolOutput "git" @("-C", (Join-Path $repoRoot "upstream\pi"), "rev-parse", "HEAD")
         rustc = Get-ToolOutput "rustc" @("--version")
         node = Get-ToolOutput "node" @("--version")
         powershell = $PSVersionTable.PSVersion.ToString()
@@ -216,7 +215,7 @@ finally {
         samples_requested = $Samples
         warmup_completed = $warmupResults.Count
         samples_completed = $sampleResults.Count
-        metric_definition = "External fresh-process launch through process exit: process startup + runtime initialization + routing + simulated task + journal writes + shutdown. Separate startup/runtime phases are not instrumented. OS caches may be warm after preheating. Not a Pi/Node speedup or real Agent quality claim."
+        metric_definition = "External fresh-process launch through process exit: process startup + runtime initialization + routing + simulated task + journal writes + shutdown. Separate startup/runtime phases are not instrumented. OS caches may be warm after preheating. Not a cross-implementation speedup or real Agent quality claim."
         percentile_method = "nearest rank; sorted ascending, ceil(p*n)-1"
         summary = [ordered]@{
             process_to_completion_ms = [ordered]@{ min = ($times | Measure-Object -Minimum).Minimum; p50 = Get-Percentile $times 0.5; p95 = Get-Percentile $times 0.95; max = ($times | Measure-Object -Maximum).Maximum }

@@ -1,6 +1,6 @@
 # Samho
 
-Pi coding agent 的 Rust 重写工程。已下载并分析完整上游仓库，当前交付为可运行的增量重写版本：Rust 核心、共享本地服务、Ratatui TUI 和本地 Web GUI。未完成项仍按实现状态文档保留边界。
+本地优先的 Agent 运行时工程：一个 Rust 核心、一个共享本地服务（HTTP + SSE）、一个 Ratatui TUI 和一个本地 Web 工作台，四端共用同一运行时与同一份数据。未完成项仍按实现状态文档保留边界。
 
 ## 启动
 
@@ -66,7 +66,7 @@ npm ci --prefix web/app
 npm --prefix web/app run build
 ```
 
-Rust 当前 workspace 共 **162 项测试**（CLI 50、core 单元 34、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
+Rust 当前 workspace 共 **201 项测试**（CLI 89、core 单元 34、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
 
 本机验收脚本默认拒绝覆盖既有报告，重跑需显式 `-Force`（PowerShell）或 `--force`（Python）：
 
@@ -78,34 +78,19 @@ python scripts/smoke_runtime.py --force
 
 浏览器验收已覆盖自动分级、同会话续接、手动 reasoning tier、固定 model、重启恢复与 trace/Object 展示；桌面及 560×900 窄屏无水平溢出，控制台无 error/warning。历史验收截图与报告已清理；当前回归由 `scripts/smoke_runtime.py`、`scripts/smoke-web.ps1` 与 Rust/Node 契约测试持续覆盖。浏览器验收未配置实际 MCP server/Skill，也未调用真实语言模型；对应协议和加载逻辑由 Rust 集成测试覆盖。
 
-当前实现状态和性能边界见 [docs/implementation-status.md](docs/implementation-status.md)。release 本地基准脚本为 `scripts/benchmark-runtime.ps1`；不据此宣称相对 Pi 的速度倍率。
+当前实现状态和性能边界见 [docs/implementation-status.md](docs/implementation-status.md)。release 本地基准脚本为 `scripts/benchmark-runtime.ps1`；基准数字仅描述本机本构建的表现，不构成相对其他实现的倍率宣称。
 
 ## 中文文档
 
 - [中文使用说明](docs/中文使用说明.md)：中文启动、网页/TUI 操作、任务执行、复盘和配置入口。
 - [当前架构](docs/architecture.md)、[自定义配置](docs/customization.md)、[实现状态](docs/implementation-status.md)。
-
-## 上游与分析
-
-上游参考仓库（pi/dsh/opencode/zcode）为分析期临时 clone，未入库，现已随本轮清理移除；固定提交记录保留在 [docs/upstream-lock.json](docs/upstream-lock.json)，需要时可据此重新 clone。
-
-| 项目 | 固定提交 |
-| --- | --- |
-| Pi，`earendil-works/pi` | `2db5e359bf84c1c0be51d2c5c5c5c7cf27072c2b` |
-| DSH，`deepseek-ai/deepseek-harness` | `5badb15009ae1756c3afe0ae0cef1faafc290ccc` |
-| ZCode，`zai-org/ZCode` | `29628c9acdb81b703bbd4080c207a0e7ce5e276e` |
-
-源码证据与重写设计：
-
-- [Pi 全面分析](docs/pi-analysis.md)：模型/provider、Agent、工具、持久化、会话树、TUI、扩展与性能热路径。
-- [DSH/ZCode 参考分析](docs/reference-analysis.md)：DSH 实际采用 Everything is a Plugin；Object 设计保留类型契约和生命周期。
-- [当前架构](docs/architecture.md)、[MCP 能力矩阵](docs/mcp-support.md)、[多场景验证计划](docs/validation-plan.md)。
+- [MCP 能力矩阵](docs/mcp-support.md)、[多场景验证计划](docs/validation-plan.md)。
 
 ## 当前边界
 
-当前已实现 Provider streaming、上下文投影与 lineage、会话 fork/steering、失败重试与降级路由、SQLite/file journal、事件索引分页、MCP optional fixture、OAuth PKCE、Skill 权限策略、Facet 握手和 generation lease。完整 MCP 官方 conformance、真实供应商质量、跨平台实机、24 小时 soak 与 Pi/Rust 同机性能对照仍未验收；这些限制不能由本地模拟器结果推断。
+当前已实现 Provider streaming、上下文投影与 lineage、会话 fork/steering、失败重试与降级路由、SQLite/file journal、事件索引分页、MCP optional fixture、OAuth PKCE、Skill 权限策略、Facet 握手和 generation lease。完整 MCP 官方 conformance、真实供应商质量、跨平台实机与 24 小时 soak 仍未验收；这些限制不能由本地模拟器结果推断。
 
-`log_content = false` 仅省略 trace 正文；会话恢复仍保存经脱敏的完整消息。trace replay 当前为事件查看/导出，不会重执行外部副作用。真实模型质量、官方 MCP conformance、跨平台 TUI 与 24 小时稳定性测试尚未完成。性能目标必须以同机、同输入、同语义的 Pi 对照实验校准。
+`log_content = false` 仅省略 trace 正文；会话恢复仍保存经脱敏的完整消息。trace replay 当前为事件查看/导出，不会重执行外部副作用。真实模型质量、官方 MCP conformance、跨平台 TUI 与 24 小时稳定性测试尚未完成。性能目标必须以同机、同输入、同语义的可复现实验校准。
 
 ## 安全边界
 

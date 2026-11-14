@@ -27,7 +27,7 @@ cargo run -p samho -- --config samho.toml serve
 
 ## 三、工具、MCP、技能与日志
 
-`tools`（工具策略）控制各内置工具的启停及 Shell 超时。默认启用完整编码工具集（参照 OpenCode/ZCode/Pi/omp 的默认工具带）：`read`（读文件，支持行窗口）、`write`（写文件）、`edit`（精确字符串替换）、`list_files`（浏览目录）、`glob`（文件模式匹配）、`grep`（正则搜索内容）、`webfetch`（按网络策略抓取网页）、`todo`（会话任务清单）、`shell`（执行命令）与 MCP 访问全部默认开启；安全敏感场景可在配置中显式关闭任意一项。`list_files` 与 `grep` 的递归下降始终跳过 `.git`、`node_modules`、`target` 和符号链接。`skill_roots` 控制技能发现来源。`mcp_servers` 接受 stdio 命令或 Streamable HTTP 地址，可通过指定环境变量读取 HTTP Bearer 令牌。`log_content` 控制轨迹载荷详细程度，`durable_logs` 控制强制落盘。
+`tools`（工具策略）控制各内置工具的启停及 Shell 超时。默认启用完整编码工具集：`read`（读文件，支持行窗口）、`write`（写文件）、`edit`（精确字符串替换）、`list_files`（浏览目录）、`glob`（文件模式匹配）、`grep`（正则搜索内容）、`webfetch`（按网络策略抓取网页）、`todo`（会话任务清单）、`shell`（执行命令）与 MCP 访问全部默认开启；安全敏感场景可在配置中显式关闭任意一项。`list_files` 与 `grep` 的递归下降始终跳过 `.git`、`node_modules`、`target` 和符号链接。`skill_roots` 控制技能发现来源。`mcp_servers` 接受 stdio 命令或 Streamable HTTP 地址，可通过指定环境变量读取 HTTP Bearer 令牌。`log_content` 控制轨迹载荷详细程度，`durable_logs` 控制强制落盘。
 
 | 领域 | 当前可自定义 | 当前边界 |
 | --- | --- | --- |

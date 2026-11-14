@@ -1,6 +1,5 @@
 /target/
 /.samho/
-/upstream/
 # reports/ 默认整体忽略，白名单放行三份图文报告的成品与生成管线
 /reports/*
 !/reports/.gitkeep

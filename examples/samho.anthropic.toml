@@ -5,8 +5,8 @@
 # 与 `samho config init` 模板的差异：此处额外给出 retry / 日志与并发等常用覆盖项，
 # 供评测与长任务场景直接复制修改。省略的节回退内置默认值（serde default）。
 
-workspace = "D:/ddcode/rpi-tests/workspace-anth"   # Agent 工具沙箱根目录
-data_dir = "D:/ddcode/rpi-tests/data-anth"         # 会话/轨迹/预算落盘（CLI 与 serve 不得共用）
+workspace = "D:/samho-tests/workspace-anth"   # Agent 工具沙箱根目录
+data_dir = "D:/samho-tests/data-anth"         # 会话/轨迹/预算落盘（CLI 与 serve 不得共用）
 http_bind = "0.0.0.0:7434"
 max_turns = 40
 max_concurrent_tasks = 2
