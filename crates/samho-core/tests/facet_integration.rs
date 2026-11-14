@@ -324,7 +324,7 @@ async fn separate_process_handshake_call_cancel_and_disconnect() {
             .expect("fixture stdout closed")
             .expect("read fixture stdout"),
         Err(_) => {
-            child.start_kill();
+            let _ = child.start_kill();
             let mut message = String::new();
             if let Some(mut stream) = child.stderr.take() {
                 let _ = stream.read_to_string(&mut message).await;
