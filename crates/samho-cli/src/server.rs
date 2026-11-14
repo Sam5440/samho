@@ -203,157 +203,24 @@ pub fn router(runtime: Arc<AgentRuntime>) -> Router {
     router_with_state(AppState::new(runtime))
 }
 
-// 内嵌静态资源白名单：UI 重构后前端拆分为 ES Modules + 组件化 CSS。
+// 内嵌静态资源白名单：工作台为 React + shadcn/ui 前端（web/app），由 Vite 构建为
+// web/dist 下固定文件名的产物；xterm 为惰性加载的 vendor 脚本。改前端后须先
+// `npm --prefix web/app run build` 再重新编译本 crate。
 const STATIC_ASSETS: &[(&str, &str, &str)] = &[
     (
         "/index.html",
         "text/html; charset=utf-8",
-        include_str!("../../../web/index.html"),
+        include_str!("../../../web/dist/index.html"),
     ),
     (
-        "/ui/tokens.css",
+        "/assets/app.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../../../web/dist/assets/app.js"),
+    ),
+    (
+        "/assets/app.css",
         "text/css; charset=utf-8",
-        include_str!("../../../web/ui/tokens.css"),
-    ),
-    (
-        "/ui/base.css",
-        "text/css; charset=utf-8",
-        include_str!("../../../web/ui/base.css"),
-    ),
-    (
-        "/ui/components.css",
-        "text/css; charset=utf-8",
-        include_str!("../../../web/ui/components.css"),
-    ),
-    (
-        "/ui/cult.css",
-        "text/css; charset=utf-8",
-        include_str!("../../../web/ui/cult.css"),
-    ),
-    (
-        "/app.css",
-        "text/css; charset=utf-8",
-        include_str!("../../../web/app.css"),
-    ),
-    (
-        "/js/main.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/main.js"),
-    ),
-    (
-        "/js/api.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/api.js"),
-    ),
-    (
-        "/js/store.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/store.js"),
-    ),
-    (
-        "/js/ui.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/ui.js"),
-    ),
-    (
-        "/js/markdown.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/markdown.js"),
-    ),
-    (
-        "/js/sessions.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/sessions.js"),
-    ),
-    (
-        "/js/projects-tree.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/projects-tree.js"),
-    ),
-    (
-        "/js/sidebar.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/sidebar.js"),
-    ),
-    (
-        "/js/panels/files.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/files.js"),
-    ),
-    (
-        "/js/panels/git.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/git.js"),
-    ),
-    (
-        "/js/panels/models.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/models.js"),
-    ),
-    (
-        "/js/panels/agents.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/agents.js"),
-    ),
-    (
-        "/js/panels/tasks.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/tasks.js"),
-    ),
-    (
-        "/js/panels/browser.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/browser.js"),
-    ),
-    (
-        "/js/projects.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/projects.js"),
-    ),
-    (
-        "/js/composer.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/composer.js"),
-    ),
-    (
-        "/js/model-select.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/model-select.js"),
-    ),
-    (
-        "/js/timeline/projection.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/timeline/projection.js"),
-    ),
-    (
-        "/js/timeline/render.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/timeline/render.js"),
-    ),
-    (
-        "/js/timeline/tools.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/timeline/tools.js"),
-    ),
-    (
-        "/js/trajectory/render.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/trajectory/render.js"),
-    ),
-    (
-        "/js/trajectory/expansion.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/trajectory/expansion.js"),
-    ),
-    (
-        "/js/motion.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/motion.js"),
-    ),
-    (
-        "/js/cult/gridbeam.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/cult/gridbeam.js"),
+        include_str!("../../../web/dist/assets/app.css"),
     ),
     (
         "/vendor/xterm.js",
@@ -370,28 +237,13 @@ const STATIC_ASSETS: &[(&str, &str, &str)] = &[
         "text/css; charset=utf-8",
         include_str!("../../../web/vendor/xterm.css"),
     ),
-    (
-        "/js/workspaces.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/workspaces.js"),
-    ),
-    (
-        "/js/dock.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/dock.js"),
-    ),
-    (
-        "/js/panels/terminal.js",
-        "text/javascript; charset=utf-8",
-        include_str!("../../../web/js/panels/terminal.js"),
-    ),
 ];
 
 pub(crate) fn router_with_state(app: AppState) -> Router {
     let mut router = Router::new()
         .route(
             "/",
-            get(|| async { Html(include_str!("../../../web/index.html")) }),
+            get(|| async { Html(include_str!("../../../web/dist/index.html")) }),
         )
         .route(
             "/docs",
@@ -2973,14 +2825,12 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-        // 重构后的静态资源：模块与组件 CSS 可达，旧入口下线。
+        // React + shadcn/ui 构建产物与惰性 vendor 脚本可达；旧 ES Module 入口下线。
         for path in [
-            "/js/main.js",
-            "/js/timeline/render.js",
-            "/js/trajectory/render.js",
-            "/ui/tokens.css",
-            "/ui/components.css",
-            "/app.css",
+            "/assets/app.js",
+            "/assets/app.css",
+            "/vendor/xterm.js",
+            "/vendor/xterm.css",
         ] {
             let response = app
                 .clone()
@@ -2988,6 +2838,14 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+        for path in ["/js/main.js", "/app.css", "/ui/tokens.css"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         }
         let response = app
             .oneshot(

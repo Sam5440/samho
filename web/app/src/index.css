@@ -1,0 +1,222 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* shadcn/ui（new-york v4）主题 token：zinc 中性色 + 单一蓝色强调色。
+   亮色为 :root，暗色由 <html class="dark"> 覆盖（main 依据设置解析 system）。 */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-accent: oklch(0.955 0.002 286.3);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  /* 单一强调色（蓝）与状态色 */
+  --brand: oklch(0.546 0.215 262.881);
+  --brand-foreground: oklch(0.985 0 0);
+  --success: oklch(0.596 0.145 163.225);
+  --warning: oklch(0.666 0.179 58.318);
+  --diff-add: oklch(0.596 0.145 163.225 / 0.12);
+  --diff-del: oklch(0.577 0.245 27.325 / 0.10);
+}
+
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.175 0.005 285.8);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.195 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.244 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.552 0.016 285.938);
+  --sidebar: oklch(0.165 0.005 285.823);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.244 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --brand: oklch(0.707 0.165 254.624);
+  --brand-foreground: oklch(0.141 0.005 285.823);
+  --success: oklch(0.765 0.177 163.223);
+  --warning: oklch(0.828 0.189 84.429);
+  --diff-add: oklch(0.765 0.177 163.223 / 0.13);
+  --diff-del: oklch(0.704 0.191 22.216 / 0.13);
+}
+
+@theme inline {
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-diff-add: var(--diff-add);
+  --color-diff-del: var(--diff-del);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    overflow: hidden;
+  }
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent; }
+  ::selection { background: color-mix(in oklab, var(--brand) 28%, transparent); }
+}
+
+/* ---------- Markdown 正文（markdown-it + DOMPurify 净化输出） ---------- */
+@layer components {
+  .md { @apply text-sm leading-relaxed break-words min-w-0; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { @apply my-2; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { @apply mt-5 mb-2 font-semibold tracking-tight; }
+  .md h1 { @apply border-b pb-1.5 text-xl; }
+  .md h2 { @apply border-b pb-1 text-lg; }
+  .md h3 { @apply text-base; }
+  .md h4, .md h5, .md h6 { @apply text-sm; }
+  .md ul { @apply my-2 list-disc pl-5; }
+  .md ol { @apply my-2 list-decimal pl-5; }
+  .md ul ul { list-style-type: circle; }
+  .md li { @apply my-0.5; }
+  .md li > p { @apply my-0.5; }
+  .md li.md-task { @apply list-none -ml-5; }
+  .md li.md-task input { @apply mr-1.5 align-[-2px] accent-brand; }
+  .md a { @apply text-brand underline decoration-brand/40 underline-offset-4 hover:decoration-brand; }
+  .md blockquote { @apply my-3 border-l-[3px] border-brand/40 pl-3 text-muted-foreground; }
+  .md hr { @apply my-5; }
+  .md img { @apply my-2 inline-block max-w-full rounded-md border; }
+  .md strong { @apply font-semibold; }
+  .md kbd { @apply rounded border border-b-2 bg-muted px-1 font-mono text-[0.8em]; }
+  .md mark { @apply px-0.5; }
+  .md sup, .md sub { @apply text-[0.75em]; }
+  .md details { @apply my-2 rounded-md border px-3 py-1.5; }
+  .md details > summary { @apply cursor-pointer font-medium select-none; }
+  .md details[open] > summary { @apply mb-1.5; }
+  .md dl dt { @apply font-semibold; }
+  .md dl dd { @apply mb-1 ml-4; }
+  .md :not(pre) > code { @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]; }
+  .md .md-code-block { @apply my-3 overflow-hidden rounded-lg border bg-muted/40; }
+  .md .md-code-head { @apply flex h-8 items-center gap-2 border-b bg-muted/60 pr-1 pl-3; }
+  .md .md-code-lang { @apply flex-1 font-mono text-[11px] text-muted-foreground lowercase; }
+  .md .md-code-actions { @apply flex gap-0.5; }
+  .md .md-code-actions button {
+    @apply h-6 cursor-pointer rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none;
+  }
+  .md .md-code-actions button[data-md-action="preview"] { @apply text-brand; }
+  .md .md-code-block pre { @apply max-h-[36rem] overflow-auto p-3 font-mono text-xs leading-relaxed; }
+  .md .md-code-block code { @apply bg-transparent p-0 text-[12px]; }
+  .md .md-table-wrap { @apply my-3 overflow-x-auto rounded-md border; }
+  .md table { @apply w-full border-collapse text-xs; }
+  .md th, .md td { @apply border-b px-2.5 py-1.5 text-left align-top; }
+  .md tr:last-child td { @apply border-b-0; }
+  .md th { @apply bg-muted/60 font-medium; }
+  .md tbody tr:nth-child(even) { @apply bg-muted/25; }
+  .md .md-math { @apply my-3 overflow-x-auto py-1; }
+  .md math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", math; }
+  .md math[display="block"] { display: block math; text-align: center; }
+  .md .md-math-error { @apply text-destructive; }
+  .md-muted { @apply text-muted-foreground; }
+  .md-muted h1, .md-muted h2, .md-muted h3, .md-muted h4 { @apply border-0 pb-0 text-sm font-medium; }
+}
+
+/* highlight.js 语法高亮：随亮/暗主题切换（GitHub 风格配色）。 */
+:root {
+  --hl-keyword: #cf222e; --hl-string: #0a3069; --hl-number: #0550ae; --hl-comment: #6e7781;
+  --hl-title: #8250df; --hl-type: #953800; --hl-attr: #0550ae; --hl-tag: #116329; --hl-meta: #6e7781;
+  --hl-add: #116329; --hl-del: #82071e;
+}
+.dark {
+  --hl-keyword: #ff7b72; --hl-string: #a5d6ff; --hl-number: #79c0ff; --hl-comment: #8b949e;
+  --hl-title: #d2a8ff; --hl-type: #ffa657; --hl-attr: #79c0ff; --hl-tag: #7ee787; --hl-meta: #8b949e;
+  --hl-add: #aff5b4; --hl-del: #ffdcd7;
+}
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in.hljs-keyword, .hljs-doctag { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-template-string, .hljs-char.escape_ { color: var(--hl-string); }
+.hljs-number, .hljs-symbol, .hljs-variable.language_, .hljs-built_in { color: var(--hl-number); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: var(--hl-title); }
+.hljs-type, .hljs-title.class_, .hljs-class .hljs-title, .hljs-params { color: var(--hl-type); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--hl-attr); }
+.hljs-name, .hljs-tag, .hljs-selector-pseudo { color: var(--hl-tag); }
+.hljs-meta, .hljs-meta .hljs-keyword { color: var(--hl-meta); }
+.hljs-addition { color: var(--hl-add); background: var(--diff-add); }
+.hljs-deletion { color: var(--hl-del); background: var(--diff-del); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* xterm 容器填满 */
+.term-host .xterm { height: 100%; padding: 6px 0 0 8px; }
+.term-host .xterm-viewport { background-color: transparent !important; }
+
+mark { background: color-mix(in oklab, var(--warning) 40%, transparent); color: inherit; border-radius: 2px; }
+
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.shimmer {
+  background: linear-gradient(90deg, var(--muted-foreground) 40%, var(--foreground) 50%, var(--muted-foreground) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer { animation: none; color: var(--muted-foreground); background: none; }
+}

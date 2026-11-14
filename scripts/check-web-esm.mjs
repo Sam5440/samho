@@ -1,38 +1,27 @@
-// 临时脚本：对前端模块做真实 ESM 语法检查（动态 import；运行期 DOM 缺失不算语法错误）。
-import { pathToFileURL } from 'node:url';
+// 前端构建检查：web/app 的 TypeScript 由 `npm --prefix web/app run build`（tsc + vite）负责；
+// 这里对内嵌进二进制的构建产物做语法校验（只解析不执行，不依赖 DOM）。缺失文件视为失败。
+import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import vm from 'node:vm';
 
-const files = [
-  'web/js/api.js',
-  'web/js/workspaces.js',
-  'web/js/panels/models.js',
-  'web/js/panels/agents.js',
-  'web/js/panels/tasks.js',
-  'web/js/main.js',
-  'web/js/composer.js',
-  'web/js/model-select.js',
-  'web/js/dock.js',
-  'web/js/sidebar.js',
-  'web/js/store.js',
-  'web/js/ui.js',
-  'web/js/projects-tree.js',
-  'web/js/projects.js',
-  'web/js/sessions.js',
-  'web/js/panels/terminal.js',
-  'web/js/panels/browser.js',
-];
+const files = ['web/dist/assets/app.js'];
 let bad = 0;
 for (const file of files) {
+  const full = resolve(file);
+  if (!existsSync(full)) {
+    console.log('MISSING', file, '（先运行 npm --prefix web/app run build）');
+    bad += 1;
+    continue;
+  }
   try {
-    await import(pathToFileURL(resolve(file)).href);
+    // Vite 产物为单文件模块且无顶层 import/export，可直接按 Script 解析。
+    const source = readFileSync(full, 'utf8');
+    if (/^\s*(import|export)\s/m.test(source)) throw new Error('产物含顶层 import/export，可能发生了代码分割');
+    new vm.Script(source, { filename: file });
     console.log('OK  ', file);
   } catch (error) {
-    if (error instanceof SyntaxError || /Unexpected token|import statement/.test(error.message)) {
-      console.log('SYNTAX FAIL', file, error.message);
-      bad += 1;
-    } else {
-      console.log('OK  ', file, `(runtime: ${error.message.slice(0, 48)})`);
-    }
+    console.log('FAIL', file, error.message);
+    bad += 1;
   }
 }
 process.exit(bad ? 1 : 0);

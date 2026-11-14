@@ -3,6 +3,8 @@
 > 依据：OpenCode（sst/opencode，`upstream/opencode`）与 ZCode v3.14.3（`upstream/zcode`）源码深度分析。
 > 目标：对 Samho 的 Web 工作台做完整重构——对齐 ZCode 的会话管理与轨迹追踪、OpenCode 的消息/工具/思考渲染，
 > 全局 UI 以 shadcn/ui 风格组件库落地（vanilla JS + CSS 变量，无框架、无构建，受 CSP `script-src 'self'; style-src 'self'` 约束）。
+>
+> **状态（2026-11-11）**：本文记录的是上一版原生 ES Module 工作台的设计依据，其实现已被 React + TypeScript + Vite + Tailwind v4 + shadcn/ui 重写取代（源码 `web/app`，产物 `web/dist`）。交互与数据流结论（会话树、轨迹投影、展开系统、工具卡、代际守卫、提交锁）仍然适用；文中的文件路径与“无构建”决策已过时，以 `agent.md` §9 为准。
 
 ---
 

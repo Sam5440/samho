@@ -93,9 +93,9 @@ function Invoke-SmokeTask($request) {
 try {
     Start-SmokeService
     $html = Invoke-WebRequest $baseUrl -UseBasicParsing
-    if ($html.StatusCode -ne 200 -or $html.Content -notmatch '/js/main\.js') { throw "Bundled GUI missing" }
-    # 当前入口为 ESM 拆分模块（/js/main.js + /app.css + /ui/*.css）。
-    foreach ($asset in @("app.css", "ui/tokens.css", "js/main.js")) {
+    if ($html.StatusCode -ne 200 -or $html.Content -notmatch '/assets/app\.js') { throw "Bundled GUI missing" }
+    # 当前入口为 React + shadcn/ui 构建产物（/assets/app.js + /assets/app.css）与惰性 xterm。
+    foreach ($asset in @("assets/app.js", "assets/app.css", "vendor/xterm.js")) {
         $response = Invoke-WebRequest "$baseUrl/$asset" -UseBasicParsing
         if ($response.StatusCode -ne 200) { throw "Bundled asset missing: $asset" }
     }

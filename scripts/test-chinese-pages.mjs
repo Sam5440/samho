@@ -10,10 +10,12 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const hasChinese = (text) => /[\u3400-\u4dbf\u4e00-\u9fff]/u.test(text);
 
 test('工作台、文档页和确认计划页声明中文语言并提供中文入口', () => {
-  const index = read('web/index.html');
+  // 工作台是 React 应用：HTML 外壳在 web/app/index.html，可见文案在组件源码中。
+  const shell = read('web/app/index.html');
+  const index = read('web/app/src/components/topbar.tsx');
   const docs = read('web/docs.html');
   const plan = read('web/plan.html');
-  for (const html of [index, docs, plan]) {
+  for (const html of [shell, docs, plan]) {
     assert.match(html, /<html\s+lang=["']zh-CN["']/i);
     assert.match(html, /<meta\s+charset=["']utf-8["']/i);
     assert.ok(hasChinese(html), '页面应包含中文可见文案');
