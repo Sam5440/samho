@@ -1,14 +1,17 @@
 //! TUI：`samho tui --url` 连接运行中的 `samho serve`（纯 HTTP/SSE 客户端）。
 //!
 //! 模块划分：`api` HTTP/SSE 封装、`sse` SSE 解析器、`markdown` Markdown
-//! 渲染器；视图自 M2 起按 views/ 子模块扩展。数据契约与 web 前端一致：
-//! 进度为 TaskProgress 累计快照（按 revision 整体替换），轨迹为 TraceEvent。
+//! 渲染器、`widgets` 共享小助手、`views` 视图与浮层。数据契约与 web 前端
+//! 一致：进度为 TaskProgress 累计快照（按 revision 整体替换），轨迹为
+//! TraceEvent。M2 起支持项目侧栏、工具卡、任务看板与模态浮层。
 
 mod api;
 mod markdown;
 mod sse;
+mod views;
+mod widgets;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::time::Duration;
 
@@ -24,7 +27,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -44,6 +47,78 @@ const ACCENT: Color = Color::Rgb(188, 229, 87);
 const MUTED: Color = Color::Rgb(128, 142, 151);
 const BACKGROUND: Color = Color::Rgb(14, 20, 24);
 
+/// 顶层视图（M4 起扩展文件/Git/终端/浏览器）。
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum View {
+    #[default]
+    Main,
+    Tasks,
+}
+
+/// 工具卡状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolStatus {
+    Running,
+    Ok,
+    Error,
+}
+
+/// 由 tool.start/tool.result 按 call_id 配对得到的工具卡片。
+struct ToolCard {
+    call_id: String,
+    name: String,
+    args: String,
+    status: ToolStatus,
+    latency_ms: Option<u64>,
+    result: Option<String>,
+}
+
+/// 浮层动作（菜单项确认后分发）。
+#[derive(Clone)]
+enum Action {
+    OpenSession(String),
+    RenameSession(String),
+    ForkSession(String),
+    ArchiveSession(String, bool),
+    MoveSession(String),
+    AssignSession(String, Option<String>),
+    DeleteSession(String),
+    DeleteSessionNow(String),
+    RenameProject(String),
+    ToggleProject(String, bool),
+    DeleteProject(String),
+    DeleteProjectNow(String),
+    PickModel(usize),
+}
+
+/// 输入浮层的提交动作。
+#[derive(Clone)]
+enum PromptAction {
+    NewProject,
+    RenameSession(String),
+    RenameProject(String),
+}
+
+/// 模态浮层（打开时独占键位）。
+enum Overlay {
+    /// 单行输入
+    Prompt {
+        title: String,
+        input: String,
+        action: PromptAction,
+    },
+    /// 确认（Enter 执行 accept）
+    Confirm { title: String, accept: Action },
+    /// 单选菜单
+    Menu {
+        title: String,
+        items: Vec<(String, Action)>,
+        cursor: usize,
+    },
+    /// 技能多选
+    Skills { cursor: usize },
+}
+
 #[derive(Default)]
 struct App {
     input: String,
@@ -51,6 +126,8 @@ struct App {
     status: String,
     models: Vec<Value>,
     sessions: Vec<Value>,
+    projects: Vec<Value>,
+    tasks: Vec<Value>,
     objects: Vec<Value>,
     skills: Vec<Value>,
     events: VecDeque<Value>,
@@ -59,7 +136,6 @@ struct App {
     submitting: bool,
     session_id: Option<String>,
     selected_model: usize,
-    selected_skill: usize,
     tier: usize,
     panel: usize,
     scroll: u16,
@@ -77,6 +153,38 @@ struct App {
     progress_md: Option<(u16, String, Vec<Line<'static>>)>,
     /// (宽度, 原文, 渲染结果) —— 最后一条助手消息
     assistant_md: Option<(u16, String, Vec<Line<'static>>)>,
+    /// (宽度, 原文, 渲染结果) —— 流式思考正文（muted 着色）
+    reasoning_md: Option<(u16, String, Vec<Line<'static>>)>,
+    // M2：视图/焦点/侧栏/看板/浮层/工具卡/composer
+    view: View,
+    focus_composer: bool,
+    sidebar_cursor: usize,
+    sidebar_filter: String,
+    sidebar_search: bool,
+    show_archived: bool,
+    tasks_cursor: usize,
+    pending_project_id: Option<String>,
+    selected_skills: BTreeSet<String>,
+    followup_mode: bool,
+    complexity: u32,
+    reasoning_collapsed: bool,
+    overlay: Option<Overlay>,
+    tool_cards: Vec<ToolCard>,
+    ui_tick: u64,
+}
+
+/// 资源轮询快照（字段较多，装箱避免 Update 枚举尺寸失衡）。
+struct ResourceSnapshot {
+    state: Value,
+    models: Vec<Value>,
+    sessions: Vec<Value>,
+    projects: Vec<Value>,
+    tasks: Vec<Value>,
+    objects: Vec<Value>,
+    skills: Vec<Value>,
+    ui: Value,
+    workspaces: Vec<Value>,
+    network: Value,
 }
 
 enum Update {
@@ -91,20 +199,18 @@ enum Update {
         live: Option<bool>,
         trace: Option<bool>,
     },
-    Resources {
-        state: Value,
-        models: Vec<Value>,
-        sessions: Vec<Value>,
-        objects: Vec<Value>,
-        skills: Vec<Value>,
-        ui: Value,
-        workspaces: Vec<Value>,
-        network: Value,
-    },
+    Resources(Box<ResourceSnapshot>),
     Session {
         value: Value,
         version: u64,
     },
+}
+
+/// 键位处理所需的请求上下文（client/url/回程通道），由事件循环临时借用。
+struct Ctx<'a> {
+    client: &'a reqwest::Client,
+    url: &'a str,
+    sender: &'a mpsc::Sender<Update>,
 }
 
 /// 三个后台流（资源轮询 + 两条 SSE），切换工作区/退出时统一终止。
@@ -227,27 +333,42 @@ fn reset_draft(app: &mut App) {
     app.progress = Value::Null;
     app.scroll = 0;
     app.message_count = 0;
+    app.pending_project_id = None;
+    app.tool_cards.clear();
     app.status = "新会话".into();
 }
-fn spawn_control(
-    client: reqwest::Client,
-    url: String,
-    path: String,
-    body: Value,
-    put: bool,
-    sender: mpsc::Sender<Update>,
+
+/// 通用控制请求：POST/PUT/PATCH/DELETE。`session_version` 给定时把响应
+/// 当作会话内容应用（fork 场景），否则只弹通知。
+fn spawn_request(
+    ctx: &Ctx,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
     session_version: Option<u64>,
 ) {
+    let client = ctx.client.clone();
+    let url = ctx.url.to_owned();
+    let sender = ctx.sender.clone();
+    let method = method.to_ascii_uppercase();
+    let path = path.to_owned();
     tokio::spawn(async move {
         let result = async {
-            let request = if put {
-                client.put(format!("{url}{path}"))
-            } else {
-                client.post(format!("{url}{path}"))
+            let base = format!("{url}{path}");
+            let request = match method.as_str() {
+                "PUT" => client.put(&base),
+                "PATCH" => client.patch(&base),
+                "DELETE" => client.delete(&base),
+                _ => client.post(&base),
             };
-            let response = request.json(&body).send().await?;
+            let request = if let Some(body) = &body {
+                request.json(body)
+            } else {
+                request
+            };
+            let response = request.send().await?;
             let status = response.status();
-            let value: Value = response.json().await?;
+            let value: Value = response.json().await.unwrap_or(Value::Null);
             anyhow::ensure!(
                 status.is_success(),
                 "{}",
@@ -266,6 +387,45 @@ fn spawn_control(
         let _ = sender.send(update).await;
     });
 }
+
+/// 取消运行中任务（Ctrl+C / 任务看板 s 共用）。
+fn cancel_task(ctx: &Ctx, task_id: &str) {
+    spawn_request(
+        ctx,
+        "POST",
+        &format!("/api/tasks/{task_id}/cancel"),
+        Some(json!({})),
+        None,
+    );
+}
+
+/// 打开一个会话：拉取转录并切回主视图；清空进度/工具卡等运行态。
+fn open_session(app: &mut App, ctx: &Ctx, session_id: &str) {
+    app.transcript_version += 1;
+    let version = app.transcript_version;
+    app.session_id = None; // 等响应到达再设置，避免陈旧转录
+    app.progress = Value::Null;
+    app.progress_md = None;
+    app.reasoning_md = None;
+    app.tool_cards.clear();
+    app.pending_project_id = None;
+    app.view = View::Main;
+    app.focus_composer = true;
+    app.scroll = 0;
+    app.status = "正在加载会话…".into();
+    let client = ctx.client.clone();
+    let url = ctx.url.to_owned();
+    let sender = ctx.sender.clone();
+    let path = format!("/api/sessions/{session_id}");
+    tokio::spawn(async move {
+        let update = match api::fetch(&client, &url, &path).await {
+            Ok(value) => Update::Session { value, version },
+            Err(error) => Update::Error(error.to_string()),
+        };
+        let _ = sender.send(update).await;
+    });
+}
+
 fn submit_input(app: &mut App, client: &reqwest::Client, url: &str, sender: &mpsc::Sender<Update>) {
     if app.input.trim().is_empty() {
         return;
@@ -274,12 +434,14 @@ fn submit_input(app: &mut App, client: &reqwest::Client, url: &str, sender: &mps
     if prompt.starts_with('/') {
         let (command, argument) = prompt.split_once(' ').unwrap_or((&prompt, ""));
         match command {
-            "/help" => app.messages.push(("system".into(),"命令：/steer 内容；/follow-up 内容；/fork [消息截止数] [标题]；/theme dark|light|contrast；/bind submit|new|cancel 快捷键。F7 切换工作区。".into())),
+            "/help" => app.messages.push(("system".into(),"命令：/steer 内容；/follow-up 内容；/fork [消息截止数] [标题]；/theme dark|light|contrast；/bind submit|new|cancel 快捷键；/auto 自动层级；/complexity 0-10 复杂度。快捷键：Ctrl+M 模型、F6 技能多选、Ctrl+R 思考折叠、Ctrl+F 引导模式、Shift+Tab 侧栏/输入、Alt+2 任务看板。".into())),
             "/steer"|"/follow-up" => {
                 if let Some(id)=&app.active {
                     if argument.trim().is_empty(){app.status="引导内容不能为空".into();return;}
                     let action=command.trim_start_matches('/');
-                    spawn_control(client.clone(),url.into(),format!("/api/tasks/{id}/{action}"),json!({"prompt":argument}),false,sender.clone(),None);
+                    let ctx=Ctx{client,url,sender};
+                    spawn_request(&ctx,"POST",&format!("/api/tasks/{id}/{action}"),Some(json!({"prompt":argument})),None);
+                    app.status="引导已提交".into();
                 }else{app.status="没有正在运行的任务".into();}
             }
             "/fork" => {
@@ -291,53 +453,92 @@ fn submit_input(app: &mut App, client: &reqwest::Client, url: &str, sender: &mps
                         body["cutoff"]=json!(cutoff);let title=parts.collect::<Vec<_>>().join(" ");if !title.is_empty(){body["title"]=json!(title);}
                     }
                     app.transcript_version+=1;
-                    spawn_control(client.clone(),url.into(),format!("/api/sessions/{id}/fork"),body,false,sender.clone(),Some(app.transcript_version));
+                    let ctx=Ctx{client,url,sender};
+                    spawn_request(&ctx,"POST",&format!("/api/sessions/{id}/fork"),Some(body),Some(app.transcript_version));
                 }else{app.status="请先选择已有会话".into();}
             }
             "/theme" => {
                 if !["dark","light","contrast"].contains(&argument.trim()){app.status="主题可选 dark、light、contrast".into();return;}
                 let mut ui=app.ui.clone();ui["theme"]=json!(argument.trim());
-                spawn_control(client.clone(),url.into(),"/api/ui".into(),ui,true,sender.clone(),None);
+                let ctx=Ctx{client,url,sender};
+                spawn_request(&ctx,"PUT","/api/ui",Some(ui),None);
             }
             "/bind" => {
                 let Some((action,key))=argument.split_once(' ') else{app.status="格式：/bind submit|new|cancel Ctrl+Enter".into();return;};
                 let field=match action{"submit"=>"submit_key","new"=>"new_session_key","cancel"=>"cancel_key",_=>{app.status="快捷键动作可选 submit/new/cancel".into();return;}};
                 if parse_binding(key.trim()).is_none(){app.status="快捷键格式无效".into();return;}
                 let mut ui=app.ui.clone();ui[field]=json!(key.trim());
-                spawn_control(client.clone(),url.into(),"/api/ui".into(),ui,true,sender.clone(),None);
+                let ctx=Ctx{client,url,sender};
+                spawn_request(&ctx,"PUT","/api/ui",Some(ui),None);
+            }
+            "/auto" => {
+                app.tier = 0;
+                app.status = "已切换为自动层级（auto）".into();
+            }
+            "/complexity" => {
+                match argument.trim().parse::<u32>() {
+                    Ok(n) if n <= 10 => {
+                        app.complexity = n;
+                        app.status = format!("复杂度已设为 {n}");
+                    }
+                    _ => app.status = "复杂度取值 0-10".into(),
+                }
             }
             _=>{app.status="未知命令，使用 /help 查看帮助".into();app.input=prompt;}
         }
         return;
     }
-    if app.active.is_some() || app.submitting {
+    if let Some(active) = app.active.clone() {
+        // 运行中：输入即引导（Ctrl+F 切换 steer/follow-up 语义）
+        let action = if app.followup_mode {
+            "follow-up"
+        } else {
+            "steer"
+        };
+        let ctx = Ctx {
+            client,
+            url,
+            sender,
+        };
+        spawn_request(
+            &ctx,
+            "POST",
+            &format!("/api/tasks/{active}/{action}"),
+            Some(json!({"prompt": prompt})),
+            None,
+        );
+        app.status = if app.followup_mode {
+            "引导已排队（follow-up，任务结束后执行）".into()
+        } else {
+            "引导已注入（steer）".into()
+        };
+        return;
+    }
+    if app.submitting {
         app.input = prompt;
-        app.status = "任务正在执行，请使用 /steer 或 /follow-up".into();
+        app.status = "正在提交任务，请稍候".into();
         return;
     }
     app.transcript_version += 1;
     app.messages.push(("user".into(), prompt.clone()));
     app.submitting = true;
     app.status = "正在提交任务…".into();
+    app.tool_cards.clear();
     let model = app
         .selected_model
         .checked_sub(1)
         .and_then(|i| app.models.get(i))
         .and_then(|m| m["id"].as_str());
-    let skills = app
-        .selected_skill
-        .checked_sub(1)
-        .and_then(|i| app.skills.get(i))
-        .and_then(|s| s["name"].as_str().or_else(|| s["id"].as_str()))
-        .map(|s| vec![s.trim_start_matches("skill:").to_owned()])
-        .unwrap_or_default();
+    let skills: Vec<String> = app.selected_skills.iter().cloned().collect();
     let tiers = tier_names(app);
     let tier = if app.tier == 0 {
         None
     } else {
         tiers.get(app.tier).map(String::as_str)
     };
-    let request = json!({"session_id":app.session_id,"prompt":prompt,"profile":{"complexity":4,"intelligence_tier":tier,"model":model},"skills":skills});
+    let complexity = app.complexity;
+    let session_id = app.session_id.clone();
+    let request = json!({"session_id":session_id,"prompt":prompt,"profile":{"complexity":complexity,"intelligence_tier":tier,"model":model},"skills":skills});
     spawn_task(client.clone(), url.into(), request, sender.clone());
 }
 
@@ -352,26 +553,41 @@ fn spawn_resources(
     tokio::spawn(async move {
         loop {
             let result = async {
-                let (state, models, sessions, objects, skills, ui, workspaces, network) = tokio::try_join!(
+                let (
+                    state,
+                    models,
+                    sessions,
+                    projects,
+                    tasks,
+                    objects,
+                    skills,
+                    ui,
+                    workspaces,
+                    network,
+                ) = tokio::try_join!(
                     api::fetch(&resource_client, &resource_url, "/api/state"),
                     api::fetch(&resource_client, &resource_url, "/api/models"),
                     api::fetch(&resource_client, &resource_url, "/api/sessions"),
+                    api::fetch(&resource_client, &resource_url, "/api/projects"),
+                    api::fetch(&resource_client, &resource_url, "/api/tasks"),
                     api::fetch(&resource_client, &resource_url, "/api/objects"),
                     api::fetch(&resource_client, &resource_url, "/api/skills"),
                     api::fetch(&resource_client, &resource_url, "/api/ui"),
                     api::fetch(&resource_client, &resource_url, "/api/workspaces"),
                     api::fetch(&resource_client, &resource_url, "/api/network"),
                 )?;
-                Ok::<_, anyhow::Error>(Update::Resources {
+                Ok::<_, anyhow::Error>(Update::Resources(Box::new(ResourceSnapshot {
                     state,
                     models: array(models),
                     sessions: array(sessions),
+                    projects: array(projects),
+                    tasks: tasks["tasks"].as_array().cloned().unwrap_or_default(),
                     objects: array(objects),
                     skills: array(skills),
                     ui,
                     workspaces: array(workspaces),
                     network,
-                })
+                })))
             }
             .await;
             let update = match result {
@@ -412,6 +628,8 @@ pub async fn run(url: &str) -> Result<()> {
     let (sender, mut receiver) = mpsc::channel::<Update>(128);
     let mut app = App {
         status: format!("已连接 {url}"),
+        focus_composer: true,
+        complexity: 4,
         ..App::default()
     };
     let mut streams = spawn_streams(&client, &url, &sender);
@@ -419,8 +637,14 @@ pub async fn run(url: &str) -> Result<()> {
     let result = async {
         loop {
             tick.tick().await;
+            app.ui_tick = app.ui_tick.wrapping_add(1);
             while let Ok(update) = receiver.try_recv() {
-                apply_update(&mut app, update);
+                let ctx = Ctx {
+                    client: &client,
+                    url: &url,
+                    sender: &sender,
+                };
+                apply_update(&mut app, update, Some(&ctx));
             }
             refresh_markdown_cache(&mut app, transcript_width(&terminal));
             terminal.draw(|frame| render(frame, &app))?;
@@ -432,63 +656,29 @@ pub async fn run(url: &str) -> Result<()> {
                     continue;
                 }
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                let alt = key.modifiers.contains(KeyModifiers::ALT);
                 if ctrl && key.code == KeyCode::Char('q') {
                     return Ok(());
                 }
-                if key_matches(key, binding(&app, "submit_key", "Ctrl+Enter"))
-                    || (key.code == KeyCode::Enter
-                        && key.modifiers == KeyModifiers::NONE
-                        && binding(&app, "submit_key", "Ctrl+Enter") == "Ctrl+Enter")
-                {
-                    submit_input(&mut app, &client, &url, &sender);
+                // 浮层打开时独占键位
+                if app.overlay.is_some() {
+                    let ctx = Ctx {
+                        client: &client,
+                        url: &url,
+                        sender: &sender,
+                    };
+                    views::overlays::handle_key(&mut app, &ctx, key);
                     continue;
                 }
-                if key_matches(key, binding(&app, "new_session_key", "Alt+N")) {
-                    if !app.submitting && app.active.is_none() {
-                        reset_draft(&mut app);
-                    }
-                    continue;
-                }
-                let key = if key_matches(key, binding(&app, "cancel_key", "Ctrl+K")) {
-                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
-                } else {
-                    key
-                };
-                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                // 全局：视图切换、工作区切换、取消/退出
                 match key.code {
-                    KeyCode::Char('q') if ctrl => return Ok::<_, anyhow::Error>(()),
-                    KeyCode::Char('c') if ctrl => {
-                        if let Some(active) = &app.active {
-                            let client = client.clone();
-                            let url = url.clone();
-                            let id = active.clone();
-                            let sender = sender.clone();
-                            tokio::spawn(async move {
-                                match client
-                                    .post(format!("{url}/api/tasks/{id}/cancel"))
-                                    .send()
-                                    .await
-                                {
-                                    Ok(response) if response.status().is_success() => {}
-                                    Ok(response) => {
-                                        let _ = sender
-                                            .send(Update::Error(format!(
-                                                "取消失败：{}",
-                                                response.status()
-                                            )))
-                                            .await;
-                                    }
-                                    Err(error) => {
-                                        let _ = sender
-                                            .send(Update::Error(format!("取消失败：{error}")))
-                                            .await;
-                                    }
-                                }
-                            });
-                            app.status = "已请求取消，等待任务结束".into();
-                        } else if !app.submitting {
-                            return Ok(());
-                        }
+                    KeyCode::Char('1') if alt && !ctrl => {
+                        app.view = View::Main;
+                        continue;
+                    }
+                    KeyCode::Char('2') if alt && !ctrl => {
+                        app.view = View::Tasks;
+                        continue;
                     }
                     KeyCode::F(7) if !app.submitting && app.active.is_none() => {
                         let choices = app
@@ -515,65 +705,38 @@ pub async fn run(url: &str) -> Result<()> {
                             streams.abort();
                             app = App {
                                 status: format!("切换至 {url}"),
+                                focus_composer: true,
+                                complexity: 4,
                                 ..Default::default()
                             };
                             streams = spawn_streams(&client, &url, &sender);
                         }
+                        continue;
                     }
-                    KeyCode::F(2) => app.tier = (app.tier + 1) % tier_names(&app).len(),
-                    KeyCode::F(3) => {
-                        app.selected_model = (app.selected_model + 1) % (app.models.len() + 1)
-                    }
-                    KeyCode::F(6) => {
-                        app.selected_skill = (app.selected_skill + 1) % (app.skills.len() + 1)
-                    }
-                    KeyCode::Tab => app.panel = (app.panel + 1) % PANELS.len(),
-                    KeyCode::F(5) if !app.submitting && app.active.is_none() => {
-                        reset_draft(&mut app)
-                    }
-                    KeyCode::F(4) if !app.submitting && app.active.is_none() => {
-                        let next = app
-                            .sessions
-                            .iter()
-                            .position(|session| id(session) == app.session_id.as_deref())
-                            .map_or(0, |index| (index + 1) % app.sessions.len().max(1));
-                        if let Some(session_id) =
-                            app.sessions.get(next).and_then(id).map(str::to_owned)
-                        {
-                            app.transcript_version += 1;
-                            let version = app.transcript_version;
-                            let client = client.clone();
-                            let url = url.clone();
-                            let sender = sender.clone();
-                            tokio::spawn(async move {
-                                let update = match api::fetch(
-                                    &client,
-                                    &url,
-                                    &format!("/api/sessions/{session_id}"),
-                                )
-                                .await
-                                {
-                                    Ok(value) => Update::Session { value, version },
-                                    Err(error) => Update::Error(error.to_string()),
-                                };
-                                let _ = sender.send(update).await;
-                            });
+                    KeyCode::Char('c') if ctrl => {
+                        if let Some(active) = app.active.clone() {
+                            let ctx = Ctx {
+                                client: &client,
+                                url: &url,
+                                sender: &sender,
+                            };
+                            cancel_task(&ctx, &active);
+                            app.status = "已请求取消，等待任务结束".into();
+                        } else if !app.submitting {
+                            return Ok(());
                         }
-                    }
-                    KeyCode::PageUp => app.scroll = app.scroll.saturating_add(8),
-                    KeyCode::PageDown => app.scroll = app.scroll.saturating_sub(8),
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        app.input.push('\n')
-                    }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                    }
-                    KeyCode::Char(character)
-                        if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) =>
-                    {
-                        app.input.push(character)
+                        continue;
                     }
                     _ => {}
+                }
+                let ctx = Ctx {
+                    client: &client,
+                    url: &url,
+                    sender: &sender,
+                };
+                match app.view {
+                    View::Main => handle_main_key(&mut app, &ctx, key),
+                    View::Tasks => views::tasks::handle_key(&mut app, &ctx, key),
                 }
             }
         }
@@ -583,6 +746,98 @@ pub async fn run(url: &str) -> Result<()> {
     drop(terminal);
     drop(guard);
     result
+}
+
+/// 主视图键位：提交/新建绑定、视图内全局键（Tab 检查面板、F2/F3/F4/F5/F6、
+/// Ctrl+R/M/F）、Shift+Tab 焦点切换，其余按键按焦点分发给侧栏或 composer。
+fn handle_main_key(app: &mut App, ctx: &Ctx, key: KeyEvent) {
+    let submit_binding = binding(app, "submit_key", "Ctrl+Enter").to_owned();
+    let plain_enter_submit = app.focus_composer
+        && key.code == KeyCode::Enter
+        && key.modifiers == KeyModifiers::NONE
+        && submit_binding == "Ctrl+Enter";
+    if (app.focus_composer && key_matches(key, &submit_binding)) || plain_enter_submit {
+        submit_input(app, ctx.client, ctx.url, ctx.sender);
+        return;
+    }
+    if key_matches(key, binding(app, "new_session_key", "Alt+N")) {
+        if !app.submitting && app.active.is_none() {
+            reset_draft(app);
+        }
+        return;
+    }
+    let key = if key_matches(key, binding(app, "cancel_key", "Ctrl+K")) {
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+    } else {
+        key
+    };
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    match key.code {
+        // Shift+Tab（部分终端上报 BackTab）在侧栏/输入间切换焦点
+        KeyCode::BackTab | KeyCode::Tab
+            if key.modifiers.contains(KeyModifiers::SHIFT) && !ctrl && !alt =>
+        {
+            app.focus_composer = !app.focus_composer;
+        }
+        KeyCode::Tab if !ctrl && !alt => app.panel = (app.panel + 1) % PANELS.len(),
+        KeyCode::F(2) => app.tier = (app.tier + 1) % tier_names(app).len(),
+        KeyCode::F(3) => app.selected_model = (app.selected_model + 1) % (app.models.len() + 1),
+        KeyCode::F(4) if !app.submitting && app.active.is_none() => {
+            let next = app
+                .sessions
+                .iter()
+                .position(|s| s["id"].as_str() == app.session_id.as_deref())
+                .map_or(0, |index| (index + 1) % app.sessions.len().max(1));
+            if let Some(session_id) = app
+                .sessions
+                .get(next)
+                .and_then(|s| s["id"].as_str())
+                .map(str::to_owned)
+            {
+                open_session(app, ctx, &session_id);
+            }
+        }
+        KeyCode::F(5) if !app.submitting && app.active.is_none() => reset_draft(app),
+        KeyCode::F(6) => {
+            if app.overlay.is_none() {
+                app.overlay = Some(Overlay::Skills { cursor: 0 });
+            }
+        }
+        KeyCode::Char('r') if ctrl && !alt => app.reasoning_collapsed = !app.reasoning_collapsed,
+        KeyCode::Char('f') if ctrl && !alt => {
+            app.followup_mode = !app.followup_mode;
+            app.status = if app.followup_mode {
+                "引导模式：follow-up（排队，任务结束后执行）"
+            } else {
+                "引导模式：steer（即时注入当前任务）"
+            }
+            .into();
+        }
+        KeyCode::Char('m') if ctrl && !alt => {
+            if app.overlay.is_none() {
+                app.overlay = Some(views::overlays::model_menu(app));
+            }
+        }
+        KeyCode::PageUp => app.scroll = app.scroll.saturating_add(8),
+        KeyCode::PageDown => app.scroll = app.scroll.saturating_sub(8),
+        _ => {
+            if app.focus_composer {
+                match key.code {
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        app.input.push('\n')
+                    }
+                    KeyCode::Backspace => {
+                        app.input.pop();
+                    }
+                    KeyCode::Char(character) if !ctrl && !alt => app.input.push(character),
+                    _ => {}
+                }
+            } else {
+                views::sidebar::handle_key(app, ctx, key);
+            }
+        }
+    }
 }
 
 /// 对话中列的可用文本宽度（与 render 的布局约束保持一致）。
@@ -602,6 +857,7 @@ fn transcript_width(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> u16 {
 /// 与 web 前端「按 revision 整体替换」的语义一致）。
 fn refresh_markdown_cache(app: &mut App, width: u16) {
     let md = markdown_palette(app);
+    let muted = palette(app.ui["theme"].as_str().unwrap_or("dark")).1;
     if let Some(text) = app.progress["text"].as_str() {
         let rebuild = app
             .progress_md
@@ -615,6 +871,31 @@ fn refresh_markdown_cache(app: &mut App, width: u16) {
         }
     } else {
         app.progress_md = None;
+    }
+    if let Some(text) = app.progress["reasoning"].as_str() {
+        let rebuild = app
+            .reasoning_md
+            .as_ref()
+            .is_none_or(|(cached_width, cached_text, _)| {
+                *cached_width != width || cached_text != text
+            });
+        if rebuild {
+            // 思考正文整体降为 muted（保留加粗/斜体等结构修饰）
+            let lines = markdown::render(text, &md, width)
+                .into_iter()
+                .map(|line| {
+                    Line::from(
+                        line.spans
+                            .into_iter()
+                            .map(|span| Span::styled(span.content, span.style.fg(muted)))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect();
+            app.reasoning_md = Some((width, text.to_owned(), lines));
+        }
+    } else {
+        app.reasoning_md = None;
     }
     if let Some((_, content)) = app
         .messages
@@ -639,6 +920,70 @@ fn refresh_markdown_cache(app: &mut App, width: u16) {
 
 fn markdown_palette(app: &App) -> markdown::MarkdownPalette {
     markdown::MarkdownPalette::from_theme(app.ui["theme"].as_str().unwrap_or("dark"))
+}
+
+/// tool.start/tool.result → 按 call_id 配对维护工具卡；只记录当前任务
+/// （轨迹匹配）或当前会话相关的事件，结果事件仅在卡片已存在时更新。
+fn upsert_tool_card(app: &mut App, event: &Value) {
+    let kind = event["kind"].as_str().unwrap_or("");
+    if kind != "tool.start" && kind != "tool.result" {
+        return;
+    }
+    let payload = &event["payload"];
+    let Some(call_id) = payload["call_id"].as_str().map(str::to_owned) else {
+        return;
+    };
+    if kind == "tool.result" {
+        if let Some(card) = app
+            .tool_cards
+            .iter_mut()
+            .find(|card| card.call_id == call_id)
+        {
+            card.status = if payload["is_error"].as_bool().unwrap_or(false) {
+                ToolStatus::Error
+            } else {
+                ToolStatus::Ok
+            };
+            card.latency_ms = payload["latency_ms"].as_u64();
+            card.result = Some(widgets::arg_summary(&payload["result"], 120));
+        }
+        return;
+    }
+    let relevant = if let Some(trace) = app.progress["trace_id"].as_str() {
+        event["trace_id"].as_str() == Some(trace)
+    } else if !app.progress.is_null() {
+        true
+    } else {
+        app.session_id
+            .as_deref()
+            .is_some_and(|sid| event["session_id"].as_str() == Some(sid))
+    };
+    if !relevant {
+        return;
+    }
+    let name = payload["name"].as_str().unwrap_or("工具").to_owned();
+    let args = widgets::arg_summary(&payload["arguments"], 100);
+    if let Some(card) = app
+        .tool_cards
+        .iter_mut()
+        .find(|card| card.call_id == call_id)
+    {
+        card.name = name;
+        card.args = args;
+        card.status = ToolStatus::Running;
+    } else {
+        app.tool_cards.push(ToolCard {
+            call_id,
+            name,
+            args,
+            status: ToolStatus::Running,
+            latency_ms: None,
+            result: None,
+        });
+        if app.tool_cards.len() > 40 {
+            app.tool_cards.remove(0);
+        }
+    }
 }
 
 fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc::Sender<Update>) {
@@ -694,7 +1039,7 @@ fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc
     });
 }
 
-fn apply_update(app: &mut App, update: Update) {
+fn apply_update(app: &mut App, update: Update, ctx: Option<&Ctx>) {
     match update {
         Update::Notice(text) => app.status = text,
         Update::Progress(value) => {
@@ -715,6 +1060,18 @@ fn apply_update(app: &mut App, update: Update) {
             }
             if let Some(id) = result["session_id"].as_str() {
                 app.session_id = Some(id.into());
+                // 草稿期选择的项目：任务完成后把新会话归入
+                if let Some(ctx) = ctx
+                    && let Some(project) = app.pending_project_id.take()
+                {
+                    spawn_request(
+                        ctx,
+                        "PATCH",
+                        &format!("/api/sessions/{id}"),
+                        Some(json!({"project_id": project})),
+                        None,
+                    );
+                }
             }
             app.status = format!(
                 "{} · 模型 {} · 轨迹 {}",
@@ -742,6 +1099,7 @@ fn apply_update(app: &mut App, update: Update) {
                 return; // SSE 回放与轮询兜底的重复帧
             }
             app.last_event_seq = sequence;
+            upsert_tool_card(app, &event);
             app.events.push_back(event);
             while app.events.len() > 300 {
                 app.events.pop_front();
@@ -755,16 +1113,19 @@ fn apply_update(app: &mut App, update: Update) {
                 app.trace_sse = trace;
             }
         }
-        Update::Resources {
-            state,
-            models,
-            sessions,
-            objects,
-            skills,
-            ui,
-            workspaces,
-            network,
-        } => {
+        Update::Resources(payload) => {
+            let ResourceSnapshot {
+                state,
+                models,
+                sessions,
+                projects,
+                tasks,
+                objects,
+                skills,
+                ui,
+                workspaces,
+                network,
+            } = *payload;
             app.ui = ui;
             app.workspaces = workspaces;
             app.state = state;
@@ -773,6 +1134,8 @@ fn apply_update(app: &mut App, update: Update) {
             }
             app.models = models;
             app.sessions = sessions;
+            app.projects = projects;
+            app.tasks = tasks;
             if let Some(id) = &app.session_id
                 && let Some(session) = app
                     .sessions
@@ -792,9 +1155,6 @@ fn apply_update(app: &mut App, update: Update) {
             app.lan = format!("{address}:{port}");
             if app.selected_model > app.models.len() {
                 app.selected_model = 0;
-            }
-            if app.selected_skill > app.skills.len() {
-                app.selected_skill = 0;
             }
         }
         Update::Session {
@@ -854,6 +1214,10 @@ fn render(frame: &mut Frame, app: &App) {
         .and_then(|index| app.models.get(index))
         .and_then(|model| model["id"].as_str())
         .unwrap_or("自动");
+    let view_label = match app.view {
+        View::Main => "对话",
+        View::Tasks => "任务",
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
@@ -861,12 +1225,12 @@ fn render(frame: &mut Frame, app: &App) {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "  层级:{}  模型:{}  {}",
+                "  视图:{view_label}  层级:{}  模型:{model}  复杂度:{}  {}",
                 tier_names(app)
                     .get(app.tier)
                     .map(String::as_str)
                     .unwrap_or("auto"),
-                model,
+                app.complexity,
                 if simulated {
                     "模拟模式"
                 } else {
@@ -877,165 +1241,10 @@ fn render(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::BOTTOM)),
         rows[0],
     );
-    let columns = Layout::horizontal([
-        Constraint::Percentage(22),
-        Constraint::Percentage(51),
-        Constraint::Percentage(27),
-    ])
-    .split(rows[1]);
-    let mut session_lines = vec![
-        Line::styled("F4 切换 / F5 新建", Style::default().fg(muted)),
-        Line::raw(""),
-    ];
-    for session in &app.sessions {
-        let session_id = id(session).unwrap_or("unknown");
-        let title = session
-            .get("title")
-            .or_else(|| session.get("name"))
-            .and_then(Value::as_str)
-            .unwrap_or(session_id);
-        let current = Some(session_id) == app.session_id.as_deref();
-        session_lines.push(Line::styled(
-            format!("{} {title}", if current { "▸" } else { " " }),
-            Style::default().fg(if current { accent } else { muted }),
-        ));
+    match app.view {
+        View::Main => views::main::render(frame, app, rows[1], rows[2]),
+        View::Tasks => views::tasks::render(frame, app, rows[1], rows[2]),
     }
-    if app.sessions.is_empty() {
-        session_lines.push(Line::raw("暂无会话"));
-    }
-    frame.render_widget(
-        Paragraph::new(session_lines)
-            .block(Block::default().title(" 会话 ").borders(Borders::ALL))
-            .wrap(Wrap { trim: false }),
-        columns[0],
-    );
-    let mut transcript = vec![
-        Line::styled(
-            "共享 Rust 服务 · SSE 流式 · Markdown 渲染",
-            Style::default().fg(muted),
-        ),
-        Line::raw(""),
-    ];
-    for (role, content) in &app.messages {
-        transcript.push(Line::styled(
-            role_label(role),
-            Style::default()
-                .fg(if role == "user" {
-                    accent
-                } else if role == "error" {
-                    Color::Red
-                } else {
-                    Color::Cyan
-                })
-                .add_modifier(Modifier::BOLD),
-        ));
-        // 助手消息走 Markdown 渲染；其余角色保持原文
-        if role == "assistant" {
-            match &app.assistant_md {
-                Some((_, cached_text, lines)) if cached_text == content => {
-                    transcript.extend(lines.iter().cloned());
-                }
-                _ => transcript.extend(content.lines().map(|line| Line::raw(line.to_owned()))),
-            }
-        } else {
-            transcript.extend(content.lines().map(|line| Line::raw(line.to_owned())));
-        }
-        transcript.push(Line::raw(""));
-    }
-    if !app.progress.is_null() {
-        transcript.push(Line::styled(
-            "正在生成（累计脱敏快照）",
-            Style::default().fg(accent),
-        ));
-        if let Some(reasoning) = app.progress["reasoning"].as_str() {
-            transcript.extend(
-                reasoning
-                    .lines()
-                    .map(|line| Line::styled(line.to_owned(), Style::default().fg(muted))),
-            );
-        }
-        if let Some(text) = app.progress["text"].as_str() {
-            match &app.progress_md {
-                Some((_, cached_text, lines)) if cached_text == text => {
-                    transcript.extend(lines.iter().cloned());
-                }
-                _ => transcript.extend(text.lines().map(|line| Line::raw(line.to_owned()))),
-            }
-        }
-        if let Some(calls) = app.progress["tool_calls"].as_array()
-            && !calls.is_empty()
-        {
-            transcript.push(Line::styled(
-                format!("🔧 工具调用 ×{}", calls.len()),
-                Style::default().fg(muted),
-            ));
-        }
-    }
-    if app.messages.is_empty() {
-        transcript.push(Line::raw(
-            "输入任务，使用 F2 选择层级、F3 固定模型。/help 查看命令。",
-        ));
-    }
-    let width = usize::from(columns[1].width.saturating_sub(2)).max(1);
-    let lines = transcript
-        .iter()
-        .map(|line| line.width().max(1).div_ceil(width))
-        .sum::<usize>();
-    let scroll = lines
-        .saturating_sub(usize::from(columns[1].height.saturating_sub(2)))
-        .saturating_sub(usize::from(app.scroll))
-        .min(usize::from(u16::MAX)) as u16;
-    frame.render_widget(
-        Paragraph::new(transcript)
-            .block(Block::default().title(" 对话 ").borders(Borders::ALL))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        columns[1],
-    );
-    let details = match app.panel {
-        0 => Value::Array(app.events.iter().rev().take(16).cloned().collect()),
-        1 => json!(app.objects),
-        2 => json!(app.skills),
-        _ => Value::Array(
-            app.objects
-                .iter()
-                .filter(|object| {
-                    object["kind"]
-                        .as_str()
-                        .is_some_and(|kind| kind.contains("mcp"))
-                })
-                .cloned()
-                .collect(),
-        ),
-    };
-    frame.render_widget(
-        Paragraph::new(serde_json::to_string_pretty(&details).unwrap_or_default())
-            .block(
-                Block::default()
-                    .title(format!(" {} · Tab ", PANELS[app.panel]))
-                    .borders(Borders::ALL),
-            )
-            .style(Style::default().fg(muted))
-            .wrap(Wrap { trim: false }),
-        columns[2],
-    );
-    let skill = app
-        .selected_skill
-        .checked_sub(1)
-        .and_then(|index| app.skills.get(index))
-        .and_then(|skill| skill["name"].as_str().or_else(|| skill["id"].as_str()))
-        .unwrap_or("无");
-    frame.render_widget(
-        Paragraph::new(app.input.as_str())
-            .block(
-                Block::default()
-                    .title(format!(" 任务 · 提交见快捷键 · 技能:{skill} "))
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(accent)),
-            )
-            .wrap(Wrap { trim: false }),
-        rows[2],
-    );
     frame.render_widget(
         Paragraph::new(app.status.as_str()).style(Style::default().fg(accent)),
         rows[3],
@@ -1046,31 +1255,41 @@ fn render(frame: &mut Frame, app: &App) {
             Style::default().fg(if on { Color::Green } else { Color::Red }),
         )
     };
+    let hints = match app.view {
+        View::Main => format!(
+            "Ctrl+Q 退出  Shift+Tab 侧栏/输入  Alt+1 对话 Alt+2 任务  Tab 检查  F2 层级 Ctrl+M 模型 F6 技能  Ctrl+R 思考  Ctrl+F 引导  {} 提交  {} 新建",
+            binding(app, "submit_key", "Ctrl+Enter"),
+            binding(app, "new_session_key", "Alt+N")
+        ),
+        View::Tasks => {
+            "Ctrl+Q 退出  ↑↓ 选择  Enter 打开会话  s 停止  Alt+1/Esc 返回对话".to_owned()
+        }
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::raw("流 "),
             dot(app.live_sse),
             dot(app.trace_sse),
             Span::raw(format!("  LAN {}  ", app.lan)),
-            Span::styled(
-                format!(
-                    "Ctrl+Q 退出  {} 提交  {} 新建  {} 取消  F2 层级 F3 模型 F4 会话 F6 技能 F7 工作区 Tab 检查",
-                    binding(app, "submit_key", "Ctrl+Enter"),
-                    binding(app, "new_session_key", "Alt+N"),
-                    binding(app, "cancel_key", "Ctrl+K")
-                ),
-                Style::default().fg(muted),
-            ),
+            Span::styled(hints, Style::default().fg(muted)),
         ])),
         rows[4],
     );
-    if rows[2].width > 2 && rows[2].height > 2 {
+    // composer 光标（主视图 + 输入焦点 + 无浮层）
+    if app.view == View::Main
+        && app.focus_composer
+        && app.overlay.is_none()
+        && rows[2].width > 2
+        && rows[2].height > 2
+    {
         let input_width = usize::from(rows[2].width - 2);
         let cursor = Line::raw(app.input.lines().last().unwrap_or(""))
             .width()
             .min(input_width.saturating_sub(1)) as u16;
         frame.set_cursor_position((rows[2].x + 1 + cursor, rows[2].y + 1));
     }
+    // 浮层最后渲染（盖在主内容之上），必要时自带光标
+    views::overlays::render(frame, app, area);
 }
 
 #[cfg(test)]
@@ -1135,6 +1354,7 @@ mod tests {
                 value: json!({"id":"old-session","messages":[{"role":"user","content":"old transcript"}]}),
                 version: 1,
             },
+            None,
         );
         assert!(app.session_id.is_none());
         assert_eq!(app.messages[0].1, "new draft");
@@ -1145,10 +1365,12 @@ mod tests {
                 value: json!({"id":"old-session","messages":[]}),
                 version: 2,
             },
+            None,
         );
         apply_update(
             &mut app,
             Update::Error("temporary resource connection failure".into()),
+            None,
         );
         assert!(app.submitting);
         assert_eq!(app.messages[0].1, "new draft");
@@ -1187,10 +1409,12 @@ mod tests {
         apply_update(
             &mut app,
             Update::Progress(json!({"text":"第一段","revision":1})),
+            None,
         );
         apply_update(
             &mut app,
             Update::Progress(json!({"text":"第一段第二段","revision":2})),
+            None,
         );
         assert_eq!(app.progress["text"], "第一段第二段");
         apply_update(
@@ -1198,6 +1422,7 @@ mod tests {
             Update::Finished(
                 json!({"status":"complete","result":{"output":"最终答复","session_id":"s"}}),
             ),
+            None,
         );
         assert!(app.progress.is_null());
         assert_eq!(app.messages.len(), 1);
@@ -1227,22 +1452,26 @@ mod tests {
             apply_update(
                 &mut app,
                 Update::TraceEvent(json!({"sequence":sequence,"kind":"tool.start"})),
+                None,
             );
         }
         assert_eq!(app.events.len(), 3);
         assert_eq!(app.last_event_seq, 3);
         apply_update(
             &mut app,
-            Update::Resources {
+            Update::Resources(Box::new(ResourceSnapshot {
                 state: json!({}),
                 models: vec![],
                 sessions: vec![],
+                projects: vec![],
+                tasks: vec![],
                 objects: vec![],
                 skills: vec![],
                 ui: json!({}),
                 workspaces: vec![],
                 network: json!({"addresses":["192.168.1.8","10.0.0.2"],"port":7432}),
-            },
+            })),
+            None,
         );
         assert_eq!(app.lan, "192.168.1.8:7432");
         apply_update(
@@ -1251,6 +1480,7 @@ mod tests {
                 live: Some(true),
                 trace: Some(false),
             },
+            None,
         );
         assert!(app.live_sse);
         assert!(!app.trace_sse);
@@ -1273,7 +1503,7 @@ mod tests {
         );
         refresh_markdown_cache(&mut app, 40);
         assert_eq!(app.assistant_md.as_ref().unwrap().0, 40);
-        app.progress = json!({"text":"**加粗**流式","revision":3});
+        app.progress = json!({"text":"**加粗**流式","reasoning":"思考 **要点**","revision":3});
         refresh_markdown_cache(&mut app, 60);
         let progress = app.progress_md.as_ref().unwrap();
         assert!(progress.2.iter().any(|line| {
@@ -1282,5 +1512,249 @@ mod tests {
                     && span.style.has_modifier(ratatui::style::Modifier::BOLD)
             })
         }));
+        // 思考缓存整体 muted（不保留强调色）
+        let reasoning = app.reasoning_md.as_ref().unwrap();
+        assert_eq!(reasoning.1, "思考 **要点**");
+        assert!(
+            reasoning
+                .2
+                .iter()
+                .all(|line| line.spans.iter().all(|span| span.style.fg == Some(MUTED)))
+        );
+    }
+
+    #[test]
+    fn sidebar_groups_projects_days_and_archive() {
+        let now = widgets::now_ms();
+        let app = App {
+            sessions: vec![
+                json!({"id":"a","title":"今天的会话","updated_at":now,"project_id":null,"archived":false}),
+                json!({"id":"b","title":"项目会话","updated_at":now-3_600_000,"project_id":"p1","archived":false}),
+                json!({"id":"c","title":"三天前的会话","updated_at":now-3*86_400_000,"project_id":null,"archived":false}),
+                json!({"id":"d","title":"归档会话","updated_at":now,"project_id":null,"archived":true}),
+            ],
+            projects: vec![json!({"id":"p1","name":"样例项目","color":"#ff0000","open":true})],
+            session_id: Some("a".into()),
+            ..App::default()
+        };
+        let model = views::sidebar::model(&app);
+        let labels: Vec<String> = model
+            .rows
+            .iter()
+            .map(|row| match row {
+                views::sidebar::SideRow::Group(name, _) => name.clone(),
+                views::sidebar::SideRow::Project { name, .. } => name.clone(),
+                views::sidebar::SideRow::Session { title, .. } => title.clone(),
+            })
+            .collect();
+        for expected in [
+            "样例项目",
+            "项目会话",
+            "今天",
+            "今天的会话",
+            "三天前的会话",
+            "归档",
+        ] {
+            assert!(
+                labels.iter().any(|label| label.contains(expected)),
+                "missing {expected} in {labels:?}"
+            );
+        }
+        // 归档行默认折叠；可选行 = 项目 1 + 未归档会话 3
+        assert!(!labels.iter().any(|label| label.contains("归档会话")));
+        assert_eq!(model.sel.len(), 4);
+    }
+
+    #[test]
+    fn sidebar_filter_narrows_rows_and_keys_move_cursor() {
+        let (tx, _rx) = mpsc::channel(4);
+        let client = reqwest::Client::new();
+        let ctx = Ctx {
+            client: &client,
+            url: "http://127.0.0.1:1",
+            sender: &tx,
+        };
+        let mut app = App {
+            sessions: vec![
+                json!({"id":"a","title":"写周报","updated_at":1}),
+                json!({"id":"b","title":"修 bug","updated_at":2}),
+            ],
+            focus_composer: false,
+            ..App::default()
+        };
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        );
+        assert_eq!(app.sidebar_cursor, 1);
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        );
+        assert!(app.sidebar_search);
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE),
+        );
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE),
+        );
+        assert_eq!(app.sidebar_filter, "bu");
+        // 过滤后只剩「修 bug」一条可选行，光标被夹取回 0
+        let model = views::sidebar::model(&app);
+        assert_eq!(model.sel.len(), 1);
+        assert_eq!(app.sidebar_cursor, 0);
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        assert!(!app.sidebar_search);
+        assert_eq!(app.sidebar_filter, "bu"); // 第一次 Esc 只退出搜索
+        views::sidebar::handle_key(
+            &mut app,
+            &ctx,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        assert_eq!(app.sidebar_filter, "");
+    }
+
+    #[test]
+    fn tool_cards_pair_start_and_result_by_call_id() {
+        let mut app = App {
+            progress: json!({"trace_id":"t1","revision":1}),
+            ..App::default()
+        };
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":1,"trace_id":"t1","session_id":"s","kind":"tool.start",
+                "payload":{"call_id":"c1","name":"write_file","arguments":{"path":"a.rs"}}}),
+            ),
+            None,
+        );
+        assert_eq!(app.tool_cards.len(), 1);
+        assert_eq!(app.tool_cards[0].status, ToolStatus::Running);
+        assert!(app.tool_cards[0].args.contains("path"));
+        // 其它轨迹的事件不建卡
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":2,"trace_id":"t2","session_id":"s","kind":"tool.start",
+                "payload":{"call_id":"c2","name":"shell"}}),
+            ),
+            None,
+        );
+        assert_eq!(app.tool_cards.len(), 1);
+        // 结果事件配对更新状态与耗时
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":3,"trace_id":"t1","session_id":"s","kind":"tool.result",
+                "payload":{"call_id":"c1","is_error":false,"latency_ms":123,"result":"已写入"}}),
+            ),
+            None,
+        );
+        assert_eq!(app.tool_cards[0].status, ToolStatus::Ok);
+        assert_eq!(app.tool_cards[0].latency_ms, Some(123));
+        assert_eq!(app.tool_cards[0].result.as_deref(), Some("已写入"));
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":4,"trace_id":"t1","session_id":"s","kind":"tool.result",
+                "payload":{"call_id":"c1","is_error":true}}),
+            ),
+            None,
+        );
+        assert_eq!(app.tool_cards[0].status, ToolStatus::Error);
+    }
+
+    #[test]
+    fn tasks_sections_group_and_cursor_keys() {
+        let app = App {
+            tasks: vec![
+                json!({"task_id":"1","status":"running","progress":{"session_id":"s1"}}),
+                json!({"task_id":"2","status":"failed","error":"boom"}),
+                json!({"task_id":"3","status":"completed"}),
+                json!({"task_id":"4","status":"cancelled"}),
+            ],
+            ..App::default()
+        };
+        let sections = views::tasks::sections(&app);
+        assert_eq!(sections[0].1.len(), 1);
+        assert_eq!(sections[1].1.len(), 1);
+        assert_eq!(sections[2].1.len(), 1);
+        assert_eq!(sections[3].1.len(), 1);
+        assert_eq!(views::tasks::flat(&app).len(), 4);
+        // 渲染不 panic
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                views::tasks::render(
+                    frame,
+                    &app,
+                    ratatui::layout::Rect::new(0, 0, 100, 24),
+                    ratatui::layout::Rect::new(0, 24, 100, 4),
+                )
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn complexity_and_auto_commands_update_profile_without_network() {
+        let client = reqwest::Client::new();
+        let (tx, _rx) = mpsc::channel(4);
+        let mut app = App {
+            tier: 2,
+            ..App::default()
+        };
+        app.input = "/complexity 7".into();
+        submit_input(&mut app, &client, "http://127.0.0.1:1", &tx);
+        assert_eq!(app.complexity, 7);
+        app.input = "/complexity 99".into();
+        submit_input(&mut app, &client, "http://127.0.0.1:1", &tx);
+        assert_eq!(app.complexity, 7); // 越界被拒
+        app.input = "/auto".into();
+        submit_input(&mut app, &client, "http://127.0.0.1:1", &tx);
+        assert_eq!(app.tier, 0);
+    }
+
+    #[test]
+    fn finished_keeps_pending_project_without_ctx_and_assigns_session() {
+        let mut app = App {
+            pending_project_id: Some("p1".into()),
+            ..App::default()
+        };
+        apply_update(
+            &mut app,
+            Update::Finished(
+                json!({"status":"completed","result":{"output":"done","session_id":"s9"}}),
+            ),
+            None,
+        );
+        assert_eq!(app.session_id.as_deref(), Some("s9"));
+        assert_eq!(app.pending_project_id.as_deref(), Some("p1")); // 无 ctx 时不丢失
+        assert_eq!(app.messages[0].1, "done");
+    }
+
+    #[test]
+    fn overlay_model_menu_lists_auto_and_models() {
+        let app = App {
+            models: vec![json!({"id":"m-a"}), json!({"id":"m-b"})],
+            selected_model: 1,
+            ..App::default()
+        };
+        let overlay = views::overlays::model_menu(&app);
+        let Overlay::Menu { items, cursor, .. } = overlay else {
+            panic!("expected menu overlay");
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].0, "自动（按层级路由）");
+        assert_eq!(cursor, 1);
     }
 }
