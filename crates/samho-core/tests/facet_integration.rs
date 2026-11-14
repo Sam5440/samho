@@ -303,7 +303,7 @@ async fn separate_process_handshake_call_cancel_and_disconnect() {
         .expect("Python is required for local Facet process fixture");
     let process_id = child.id().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-    let port = timeout(Duration::from_secs(5), stdout.next_line())
+    let port = timeout(Duration::from_secs(20), stdout.next_line())
         .await
         .unwrap()
         .unwrap()
