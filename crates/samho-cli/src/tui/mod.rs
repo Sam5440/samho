@@ -42,7 +42,7 @@ const TIERS: [&str; 7] = [
     "frontier",
     "specialist",
 ];
-const PANELS: [&str; 4] = ["轨迹", "对象", "技能", "MCP"];
+const PANELS: [&str; 6] = ["轨迹", "预算", "对象", "技能", "MCP", "模型"];
 const ACCENT: Color = Color::Rgb(188, 229, 87);
 const MUTED: Color = Color::Rgb(128, 142, 151);
 const BACKGROUND: Color = Color::Rgb(14, 20, 24);
@@ -53,6 +53,15 @@ enum View {
     #[default]
     Main,
     Tasks,
+}
+
+/// 主视图三栏焦点：Shift+Tab 循环切换，输入/侧栏/检查面板各占一套键位。
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Focus {
+    #[default]
+    Composer,
+    Sidebar,
+    Inspector,
 }
 
 /// 工具卡状态。
@@ -66,11 +75,32 @@ enum ToolStatus {
 /// 由 tool.start/tool.result 按 call_id 配对得到的工具卡片。
 struct ToolCard {
     call_id: String,
+    sequence: u64,
     name: String,
     args: String,
     status: ToolStatus,
     latency_ms: Option<u64>,
     result: Option<String>,
+}
+
+/// 由 model.start/model.response/model.error 配对得到的模型调用卡片。
+#[derive(Debug)]
+struct ModelCall {
+    /// 配对键：start/error 的 span（model:{turn}:{attempt}），response 按 turn 回填
+    key: String,
+    sequence: u64,
+    model_id: String,
+    turn: u64,
+    attempt: u64,
+    status: ToolStatus,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cost_usd: Option<f64>,
+    latency_ms: Option<u64>,
+    finish_reason: Option<String>,
+    error: Option<String>,
+    message: Option<String>,
+    reserved_usd: Option<f64>,
 }
 
 /// 浮层动作（菜单项确认后分发）。
@@ -89,6 +119,8 @@ enum Action {
     DeleteProject(String),
     DeleteProjectNow(String),
     PickModel(usize),
+    /// 模型角色改派（tier → model；空串 = 跟随自动路由）
+    AssignRole(String, String),
 }
 
 /// 输入浮层的提交动作。
@@ -157,7 +189,7 @@ struct App {
     reasoning_md: Option<(u16, String, Vec<Line<'static>>)>,
     // M2：视图/焦点/侧栏/看板/浮层/工具卡/composer
     view: View,
-    focus_composer: bool,
+    focus: Focus,
     sidebar_cursor: usize,
     sidebar_filter: String,
     sidebar_search: bool,
@@ -171,6 +203,15 @@ struct App {
     overlay: Option<Overlay>,
     tool_cards: Vec<ToolCard>,
     ui_tick: u64,
+    // M3：检查面板状态（轨迹卡/预算/模型角色）
+    roles: Value,
+    model_calls: Vec<ModelCall>,
+    task_cost_usd: f64,
+    inspector_cursor: usize,
+    inspector_expanded: BTreeSet<String>,
+    inspector_filter: String,
+    inspector_search: bool,
+    last_trace_id: String,
 }
 
 /// 资源轮询快照（字段较多，装箱避免 Update 枚举尺寸失衡）。
@@ -182,6 +223,7 @@ struct ResourceSnapshot {
     tasks: Vec<Value>,
     objects: Vec<Value>,
     skills: Vec<Value>,
+    roles: Value,
     ui: Value,
     workspaces: Vec<Value>,
     network: Value,
@@ -334,8 +376,19 @@ fn reset_draft(app: &mut App) {
     app.scroll = 0;
     app.message_count = 0;
     app.pending_project_id = None;
-    app.tool_cards.clear();
+    clear_run_state(app);
     app.status = "新会话".into();
+}
+
+/// 清空任务运行态（工具卡/模型调用卡/预算/检查面板光标与展开项）。
+fn clear_run_state(app: &mut App) {
+    app.tool_cards.clear();
+    app.model_calls.clear();
+    app.task_cost_usd = 0.0;
+    app.inspector_cursor = 0;
+    app.inspector_expanded.clear();
+    app.inspector_filter.clear();
+    app.inspector_search = false;
 }
 
 /// 通用控制请求：POST/PUT/PATCH/DELETE。`session_version` 给定时把响应
@@ -408,9 +461,10 @@ fn open_session(app: &mut App, ctx: &Ctx, session_id: &str) {
     app.progress_md = None;
     app.reasoning_md = None;
     app.tool_cards.clear();
+    clear_run_state(app);
     app.pending_project_id = None;
     app.view = View::Main;
-    app.focus_composer = true;
+    app.focus = Focus::Composer;
     app.scroll = 0;
     app.status = "正在加载会话…".into();
     let client = ctx.client.clone();
@@ -523,7 +577,7 @@ fn submit_input(app: &mut App, client: &reqwest::Client, url: &str, sender: &mps
     app.messages.push(("user".into(), prompt.clone()));
     app.submitting = true;
     app.status = "正在提交任务…".into();
-    app.tool_cards.clear();
+    clear_run_state(app);
     let model = app
         .selected_model
         .checked_sub(1)
@@ -561,6 +615,7 @@ fn spawn_resources(
                     tasks,
                     objects,
                     skills,
+                    roles,
                     ui,
                     workspaces,
                     network,
@@ -572,6 +627,7 @@ fn spawn_resources(
                     api::fetch(&resource_client, &resource_url, "/api/tasks"),
                     api::fetch(&resource_client, &resource_url, "/api/objects"),
                     api::fetch(&resource_client, &resource_url, "/api/skills"),
+                    api::fetch(&resource_client, &resource_url, "/api/model-roles"),
                     api::fetch(&resource_client, &resource_url, "/api/ui"),
                     api::fetch(&resource_client, &resource_url, "/api/workspaces"),
                     api::fetch(&resource_client, &resource_url, "/api/network"),
@@ -584,6 +640,7 @@ fn spawn_resources(
                     tasks: tasks["tasks"].as_array().cloned().unwrap_or_default(),
                     objects: array(objects),
                     skills: array(skills),
+                    roles,
                     ui,
                     workspaces: array(workspaces),
                     network,
@@ -628,7 +685,6 @@ pub async fn run(url: &str) -> Result<()> {
     let (sender, mut receiver) = mpsc::channel::<Update>(128);
     let mut app = App {
         status: format!("已连接 {url}"),
-        focus_composer: true,
         complexity: 4,
         ..App::default()
     };
@@ -705,7 +761,6 @@ pub async fn run(url: &str) -> Result<()> {
                             streams.abort();
                             app = App {
                                 status: format!("切换至 {url}"),
-                                focus_composer: true,
                                 complexity: 4,
                                 ..Default::default()
                             };
@@ -749,14 +804,15 @@ pub async fn run(url: &str) -> Result<()> {
 }
 
 /// 主视图键位：提交/新建绑定、视图内全局键（Tab 检查面板、F2/F3/F4/F5/F6、
-/// Ctrl+R/M/F）、Shift+Tab 焦点切换，其余按键按焦点分发给侧栏或 composer。
+/// Ctrl+R/M/F）、Shift+Tab 焦点三向循环，其余按键按焦点分发给
+/// 侧栏 / composer / 检查面板。
 fn handle_main_key(app: &mut App, ctx: &Ctx, key: KeyEvent) {
     let submit_binding = binding(app, "submit_key", "Ctrl+Enter").to_owned();
-    let plain_enter_submit = app.focus_composer
+    let plain_enter_submit = app.focus == Focus::Composer
         && key.code == KeyCode::Enter
         && key.modifiers == KeyModifiers::NONE
         && submit_binding == "Ctrl+Enter";
-    if (app.focus_composer && key_matches(key, &submit_binding)) || plain_enter_submit {
+    if (app.focus == Focus::Composer && key_matches(key, &submit_binding)) || plain_enter_submit {
         submit_input(app, ctx.client, ctx.url, ctx.sender);
         return;
     }
@@ -774,11 +830,15 @@ fn handle_main_key(app: &mut App, ctx: &Ctx, key: KeyEvent) {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        // Shift+Tab（部分终端上报 BackTab）在侧栏/输入间切换焦点
+        // Shift+Tab（部分终端上报 BackTab）：焦点三向循环 输入→侧栏→检查面板
         KeyCode::BackTab | KeyCode::Tab
             if key.modifiers.contains(KeyModifiers::SHIFT) && !ctrl && !alt =>
         {
-            app.focus_composer = !app.focus_composer;
+            app.focus = match app.focus {
+                Focus::Composer => Focus::Sidebar,
+                Focus::Sidebar => Focus::Inspector,
+                Focus::Inspector => Focus::Composer,
+            };
         }
         KeyCode::Tab if !ctrl && !alt => app.panel = (app.panel + 1) % PANELS.len(),
         KeyCode::F(2) => app.tier = (app.tier + 1) % tier_names(app).len(),
@@ -821,22 +881,20 @@ fn handle_main_key(app: &mut App, ctx: &Ctx, key: KeyEvent) {
         }
         KeyCode::PageUp => app.scroll = app.scroll.saturating_add(8),
         KeyCode::PageDown => app.scroll = app.scroll.saturating_sub(8),
-        _ => {
-            if app.focus_composer {
-                match key.code {
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        app.input.push('\n')
-                    }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                    }
-                    KeyCode::Char(character) if !ctrl && !alt => app.input.push(character),
-                    _ => {}
+        _ => match app.focus {
+            Focus::Composer => match key.code {
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    app.input.push('\n')
                 }
-            } else {
-                views::sidebar::handle_key(app, ctx, key);
-            }
-        }
+                KeyCode::Backspace => {
+                    app.input.pop();
+                }
+                KeyCode::Char(character) if !ctrl && !alt => app.input.push(character),
+                _ => {}
+            },
+            Focus::Sidebar => views::sidebar::handle_key(app, ctx, key),
+            Focus::Inspector => views::inspector::handle_key(app, ctx, key),
+        },
     }
 }
 
@@ -929,6 +987,7 @@ fn upsert_tool_card(app: &mut App, event: &Value) {
     if kind != "tool.start" && kind != "tool.result" {
         return;
     }
+    let sequence = event["sequence"].as_u64().unwrap_or(0);
     let payload = &event["payload"];
     let Some(call_id) = payload["call_id"].as_str().map(str::to_owned) else {
         return;
@@ -974,6 +1033,7 @@ fn upsert_tool_card(app: &mut App, event: &Value) {
     } else {
         app.tool_cards.push(ToolCard {
             call_id,
+            sequence,
             name,
             args,
             status: ToolStatus::Running,
@@ -984,6 +1044,152 @@ fn upsert_tool_card(app: &mut App, event: &Value) {
             app.tool_cards.remove(0);
         }
     }
+}
+
+/// model.start/model.response/model.error → 按 turn/span 配对维护模型调用卡；
+/// 相关性判定与工具卡一致（当前轨迹或当前会话），response 的 cost_usd 为
+/// 任务累计值，同步进预算面板。
+fn upsert_model_call(app: &mut App, event: &Value) {
+    let kind = event["kind"].as_str().unwrap_or("");
+    if !matches!(kind, "model.start" | "model.response" | "model.error") {
+        return;
+    }
+    let sequence = event["sequence"].as_u64().unwrap_or(0);
+    let payload = &event["payload"];
+    let turn = payload["turn"].as_u64().unwrap_or(0);
+    let attempt = payload["attempt"].as_u64().unwrap_or(1);
+    if kind == "model.start" {
+        if !model_event_relevant(app, event) {
+            return;
+        }
+        let key = format!("model:{turn}:{attempt}");
+        let call = ModelCall {
+            key: key.clone(),
+            sequence,
+            model_id: payload["model_id"].as_str().unwrap_or("模型").to_owned(),
+            turn,
+            attempt,
+            status: ToolStatus::Running,
+            input_tokens: None,
+            output_tokens: None,
+            cost_usd: None,
+            latency_ms: None,
+            finish_reason: None,
+            error: None,
+            message: None,
+            reserved_usd: payload["reserved_usd"].as_f64(),
+        };
+        if let Some(existing) = app.model_calls.iter_mut().find(|call| call.key == key) {
+            *existing = call;
+        } else {
+            app.model_calls.push(call);
+            if app.model_calls.len() > 40 {
+                app.model_calls.remove(0);
+            }
+        }
+        return;
+    }
+    // response/error：按 turn 回填运行中的卡（response 的 span 不含 attempt）
+    let target = app.model_calls.iter().position(|call| {
+        call.turn == turn
+            && (call.key == format!("model:{turn}:{attempt}") || call.status == ToolStatus::Running)
+    });
+    if let Some(index) = target {
+        let call = &mut app.model_calls[index];
+        match kind {
+            "model.response" => {
+                call.status = ToolStatus::Ok;
+                call.input_tokens = payload["usage"]["input_tokens"].as_u64();
+                call.output_tokens = payload["usage"]["output_tokens"].as_u64();
+                call.cost_usd = payload["cost_usd"].as_f64();
+                call.latency_ms = payload["latency_ms"].as_u64();
+                call.finish_reason = payload["finish_reason"].as_str().map(str::to_owned);
+                call.message = payload["message"].as_str().map(str::to_owned);
+                if let Some(cost) = call.cost_usd {
+                    app.task_cost_usd = cost;
+                }
+            }
+            _ => {
+                call.status = ToolStatus::Error;
+                call.latency_ms = payload["latency_ms"].as_u64();
+                call.error = payload["error"].as_str().map(str::to_owned);
+            }
+        }
+        return;
+    }
+    // 没有可回填的卡（例如 response 晚于卡片被挤出）且事件相关 → 补建
+    if model_event_relevant(app, event) {
+        let call = ModelCall {
+            key: format!("model:{turn}"),
+            sequence,
+            model_id: payload["model_id"].as_str().unwrap_or("模型").to_owned(),
+            turn,
+            attempt,
+            status: if kind == "model.response" {
+                ToolStatus::Ok
+            } else {
+                ToolStatus::Error
+            },
+            input_tokens: payload["usage"]["input_tokens"].as_u64(),
+            output_tokens: payload["usage"]["output_tokens"].as_u64(),
+            cost_usd: payload["cost_usd"].as_f64(),
+            latency_ms: payload["latency_ms"].as_u64(),
+            finish_reason: payload["finish_reason"].as_str().map(str::to_owned),
+            error: payload["error"].as_str().map(str::to_owned),
+            message: payload["message"].as_str().map(str::to_owned),
+            reserved_usd: None,
+        };
+        app.model_calls.push(call);
+        if app.model_calls.len() > 40 {
+            app.model_calls.remove(0);
+        }
+    }
+}
+
+/// 模型调用事件的相关性：运行中按轨迹匹配，空闲时按会话匹配。
+fn model_event_relevant(app: &App, event: &Value) -> bool {
+    if let Some(trace) = app.progress["trace_id"].as_str() {
+        event["trace_id"].as_str() == Some(trace)
+    } else if !app.progress.is_null() {
+        true
+    } else {
+        app.session_id
+            .as_deref()
+            .is_some_and(|sid| event["session_id"].as_str() == Some(sid))
+    }
+}
+
+/// E 键：把当前轨迹导出为 Markdown 复盘报告，写入本地 reports/ 目录。
+fn export_trace(ctx: &Ctx, trace_id: &str) {
+    let client = ctx.client.clone();
+    let url = ctx.url.to_owned();
+    let sender = ctx.sender.clone();
+    let trace_id = trace_id.to_owned();
+    tokio::spawn(async move {
+        let result = async {
+            let response = client
+                .get(format!("{url}/api/traces/{trace_id}/export"))
+                .send()
+                .await?;
+            anyhow::ensure!(
+                response.status().is_success(),
+                "导出失败 {}",
+                response.status()
+            );
+            let text = response.text().await?;
+            let short = widgets::short_id(&trace_id);
+            let path = std::path::Path::new("reports").join(format!("trace-{short}.md"));
+            tokio::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new("."))).await?;
+            tokio::fs::write(&path, &text).await?;
+            Ok::<_, anyhow::Error>(path)
+        }
+        .await;
+        let update = match result {
+            Ok(path) => Update::Notice(format!("轨迹已导出到 {}", path.display())),
+            Err(error) => Update::Error(error.to_string()),
+        };
+        let _ = sender.send(update).await;
+    });
 }
 
 fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc::Sender<Update>) {
@@ -1099,7 +1305,11 @@ fn apply_update(app: &mut App, update: Update, ctx: Option<&Ctx>) {
                 return; // SSE 回放与轮询兜底的重复帧
             }
             app.last_event_seq = sequence;
+            if let Some(trace) = event["trace_id"].as_str() {
+                app.last_trace_id = trace.to_owned();
+            }
             upsert_tool_card(app, &event);
+            upsert_model_call(app, &event);
             app.events.push_back(event);
             while app.events.len() > 300 {
                 app.events.pop_front();
@@ -1122,6 +1332,7 @@ fn apply_update(app: &mut App, update: Update, ctx: Option<&Ctx>) {
                 tasks,
                 objects,
                 skills,
+                roles,
                 ui,
                 workspaces,
                 network,
@@ -1146,6 +1357,11 @@ fn apply_update(app: &mut App, update: Update, ctx: Option<&Ctx>) {
             }
             app.objects = objects;
             app.skills = skills;
+            app.roles = roles;
+            // 轮询返回后按真实清单夹取检查面板光标
+            app.inspector_cursor = app
+                .inspector_cursor
+                .min(views::inspector::panel_len(app).saturating_sub(1));
             let address = network["addresses"]
                 .as_array()
                 .and_then(|addresses| addresses.first())
@@ -1277,7 +1493,7 @@ fn render(frame: &mut Frame, app: &App) {
     );
     // composer 光标（主视图 + 输入焦点 + 无浮层）
     if app.view == View::Main
-        && app.focus_composer
+        && app.focus == Focus::Composer
         && app.overlay.is_none()
         && rows[2].width > 2
         && rows[2].height > 2
@@ -1467,6 +1683,7 @@ mod tests {
                 tasks: vec![],
                 objects: vec![],
                 skills: vec![],
+                roles: json!({}),
                 ui: json!({}),
                 workspaces: vec![],
                 network: json!({"addresses":["192.168.1.8","10.0.0.2"],"port":7432}),
@@ -1579,7 +1796,7 @@ mod tests {
                 json!({"id":"a","title":"写周报","updated_at":1}),
                 json!({"id":"b","title":"修 bug","updated_at":2}),
             ],
-            focus_composer: false,
+            focus: Focus::Sidebar,
             ..App::default()
         };
         views::sidebar::handle_key(
@@ -1672,6 +1889,170 @@ mod tests {
             None,
         );
         assert_eq!(app.tool_cards[0].status, ToolStatus::Error);
+    }
+
+    #[test]
+    fn model_calls_pair_by_turn_with_cost_accumulation() {
+        let mut app = App {
+            progress: json!({"trace_id":"t1","revision":1}),
+            ..App::default()
+        };
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":1,"trace_id":"t1","session_id":"s","span_id":"model:1:1",
+                "kind":"model.start","payload":{"turn":1,"attempt":1,"model_id":"glm","reserved_usd":0.01}}),
+            ),
+            None,
+        );
+        assert_eq!(app.model_calls.len(), 1);
+        assert_eq!(app.model_calls[0].status, ToolStatus::Running);
+        assert_eq!(app.model_calls[0].key, "model:1:1");
+        assert_eq!(app.model_calls[0].reserved_usd, Some(0.01));
+        // 响应按 turn 回填（response 事件 span 无 attempt），并累计任务成本
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":2,"trace_id":"t1","session_id":"s","span_id":"model:1",
+                "kind":"model.response",
+                "payload":{"turn":1,"model_id":"glm","finish_reason":"stop",
+                "usage":{"input_tokens":120,"output_tokens":45},"cost_usd":0.02,"latency_ms":900}}),
+            ),
+            None,
+        );
+        assert_eq!(app.model_calls[0].status, ToolStatus::Ok);
+        assert_eq!(app.model_calls[0].input_tokens, Some(120));
+        assert_eq!(app.model_calls[0].output_tokens, Some(45));
+        assert_eq!(app.model_calls[0].finish_reason.as_deref(), Some("stop"));
+        assert_eq!(app.model_calls[0].latency_ms, Some(900));
+        assert_eq!(app.task_cost_usd, 0.02);
+        // 重试 attempt 建新卡，error 按 turn 回填为失败
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":3,"trace_id":"t1","session_id":"s","span_id":"model:2:2",
+                "kind":"model.start","payload":{"turn":2,"attempt":2,"model_id":"glm"}}),
+            ),
+            None,
+        );
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":4,"trace_id":"t1","session_id":"s","span_id":"model:2",
+                "kind":"model.error","payload":{"turn":2,"attempt":2,"error":"rate limited","retryable":true}}),
+            ),
+            None,
+        );
+        assert_eq!(app.model_calls.len(), 2);
+        assert_eq!(app.model_calls[1].status, ToolStatus::Error);
+        assert_eq!(app.model_calls[1].attempt, 2);
+        assert_eq!(app.model_calls[1].error.as_deref(), Some("rate limited"));
+        // 其它轨迹不建卡
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":5,"trace_id":"t9","session_id":"s","kind":"model.start",
+                "payload":{"turn":1,"attempt":1,"model_id":"other"}}),
+            ),
+            None,
+        );
+        assert_eq!(app.model_calls.len(), 2);
+    }
+
+    #[test]
+    fn trajectory_filter_expand_and_navigation_keys() {
+        let client = reqwest::Client::new();
+        let (tx, _rx) = mpsc::channel(4);
+        let ctx = Ctx {
+            client: &client,
+            url: "http://127.0.0.1:1",
+            sender: &tx,
+        };
+        let mut app = App {
+            focus: Focus::Inspector,
+            progress: json!({"trace_id":"t1","revision":1}),
+            ..App::default()
+        };
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":1,"trace_id":"t1","session_id":"s","kind":"tool.start",
+                "payload":{"call_id":"c1","name":"shell","arguments":{"cmd":"ls"}}}),
+            ),
+            None,
+        );
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":2,"trace_id":"t1","session_id":"s","kind":"tool.result",
+                "payload":{"call_id":"c1","is_error":false}}),
+            ),
+            None,
+        );
+        apply_update(
+            &mut app,
+            Update::TraceEvent(
+                json!({"sequence":3,"trace_id":"t1","session_id":"s","kind":"model.start",
+                "payload":{"turn":1,"attempt":1,"model_id":"glm","span_id":"model:1:1"}}),
+            ),
+            None,
+        );
+        // 过滤：只留 shell 工具卡
+        app.inspector_filter = "shell".into();
+        let cards = views::inspector::trajectory(&app);
+        assert_eq!(cards.len(), 1);
+        app.inspector_filter.clear();
+        assert_eq!(views::inspector::trajectory(&app).len(), 2);
+        // j/Enter：光标移动 + 展开键记录
+        let key = |code: KeyCode, modifiers: KeyModifiers| KeyEvent::new(code, modifiers);
+        views::inspector::handle_key(&mut app, &ctx, key(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.inspector_cursor, 1);
+        views::inspector::handle_key(&mut app, &ctx, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.inspector_expanded.len(), 1);
+        views::inspector::handle_key(&mut app, &ctx, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.inspector_expanded.is_empty());
+    }
+
+    #[test]
+    fn budget_and_roles_panels_render_without_panic() {
+        let app = App {
+            panel: 1,
+            state: json!({
+                "budget":{"tokens":150,"usd":0.03},
+                "limits":{"max_turns":24},
+                "log_content":false
+            }),
+            progress: json!({"usage":{"input_tokens":80,"output_tokens":70}}),
+            roles: json!({"roles":{"main":"glm","fast":"astra"},"default_model":"glm"}),
+            ..App::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        terminal
+            .draw(|frame| views::inspector::render(frame, &app, area, true))
+            .unwrap();
+        let budget: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(budget.replace(' ', "").contains("150"));
+        assert!(budget.replace(' ', "").contains("$0.03"));
+        // 模型角色面板同样渲染不 panic
+        let mut app = App {
+            panel: 5,
+            roles: json!({"roles":{"main":"glm","fast":""},"default_model":"glm","tiers":["main","fast"]}),
+            ..App::default()
+        };
+        terminal
+            .draw(|frame| views::inspector::render(frame, &app, area, true))
+            .unwrap();
+        app.panel = 3;
+        terminal
+            .draw(|frame| views::inspector::render(frame, &app, area, true))
+            .unwrap();
     }
 
     #[test]

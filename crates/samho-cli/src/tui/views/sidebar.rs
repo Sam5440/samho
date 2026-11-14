@@ -268,7 +268,7 @@ fn new_session_draft(app: &mut App) {
     let project = selected_project(app);
     super::super::reset_draft(app);
     app.pending_project_id = project;
-    app.focus_composer = true;
+    app.focus = crate::tui::Focus::Composer;
     app.status = if app.pending_project_id.is_some() {
         "新会话草稿（任务完成后归入所选项目）".into()
     } else {

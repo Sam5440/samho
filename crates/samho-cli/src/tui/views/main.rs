@@ -8,11 +8,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use serde_json::{Value, json};
 
-use crate::tui::{
-    App, PANELS, ToolCard, ToolStatus, binding, palette, role_label, views::sidebar, widgets,
-};
+use crate::tui::{App, Focus, ToolCard, ToolStatus, binding, palette, role_label, widgets};
 
 pub(crate) fn render(frame: &mut Frame, app: &App, body: Rect, composer: Rect) {
     let (accent, muted, _) = palette(app.ui["theme"].as_str().unwrap_or("dark"));
@@ -22,9 +19,14 @@ pub(crate) fn render(frame: &mut Frame, app: &App, body: Rect, composer: Rect) {
         Constraint::Percentage(27),
     ])
     .split(body);
-    sidebar::render(frame, app, columns[0], !app.focus_composer);
+    super::sidebar::render(frame, app, columns[0], app.focus == Focus::Sidebar);
     transcript(frame, app, columns[1], accent, muted);
-    inspector(frame, app, columns[2], muted);
+    super::inspector::render(
+        frame,
+        app,
+        columns[2],
+        app.focus == crate::tui::Focus::Inspector,
+    );
     composer_view(frame, app, composer, accent, muted);
 }
 
@@ -213,36 +215,6 @@ fn transcript(frame: &mut Frame, app: &App, area: Rect, accent: Color, muted: Co
     );
 }
 
-fn inspector(frame: &mut Frame, app: &App, area: Rect, muted: Color) {
-    let details = match app.panel {
-        0 => Value::Array(app.events.iter().rev().take(16).cloned().collect()),
-        1 => json!(app.objects),
-        2 => json!(app.skills),
-        _ => Value::Array(
-            app.objects
-                .iter()
-                .filter(|object| {
-                    object["kind"]
-                        .as_str()
-                        .is_some_and(|kind| kind.contains("mcp"))
-                })
-                .cloned()
-                .collect(),
-        ),
-    };
-    frame.render_widget(
-        Paragraph::new(serde_json::to_string_pretty(&details).unwrap_or_default())
-            .block(
-                Block::default()
-                    .title(format!(" {} · Tab ", PANELS[app.panel]))
-                    .borders(Borders::ALL),
-            )
-            .style(Style::default().fg(muted))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
-}
-
 fn composer_view(frame: &mut Frame, app: &App, area: Rect, accent: Color, muted: Color) {
     let skills_label = if app.selected_skills.is_empty() {
         "无".to_owned()
@@ -269,7 +241,7 @@ fn composer_view(frame: &mut Frame, app: &App, area: Rect, accent: Color, muted:
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(if app.focus_composer {
+                    .border_style(Style::default().fg(if app.focus == Focus::Composer {
                         accent
                     } else {
                         muted

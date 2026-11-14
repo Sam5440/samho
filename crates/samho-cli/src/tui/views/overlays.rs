@@ -335,6 +335,19 @@ fn perform(app: &mut App, ctx: &Ctx, action: Action) {
             super::super::spawn_request(ctx, "DELETE", &format!("/api/projects/{id}"), None, None);
             app.status = "已请求删除项目".into();
         }
+        Action::AssignRole(tier, model) => {
+            // 以当前快照为基础只改派一个角色，其余保持不变
+            let mut roles = app.roles["roles"].as_object().cloned().unwrap_or_default();
+            roles.insert(tier.clone(), serde_json::Value::String(model));
+            super::super::spawn_request(
+                ctx,
+                "PUT",
+                "/api/model-roles",
+                Some(json!({"roles": roles})),
+                None,
+            );
+            app.status = format!("已请求改派任务类型 {tier}");
+        }
         Action::PickModel(index) => {
             app.selected_model = index;
             let label = app
