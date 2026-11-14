@@ -51,8 +51,8 @@ fn split_frontmatter(text: &str) -> Result<(&str, &str)> {
     bail!("unterminated skill frontmatter")
 }
 impl Skill {
-    pub fn read_metadata(path: &Path) -> Result<Self> {
-        reject_symlink_components(path)?;
+    pub fn read_metadata(path: &Path, root: &Path) -> Result<Self> {
+        reject_symlink_components(path, root)?;
         let text = std::fs::read_to_string(path)?;
         if text.len() > 1024 * 1024 {
             bail!("skill exceeds 1MiB");
@@ -88,7 +88,12 @@ impl Skill {
         })
     }
     pub async fn instructions(&self) -> Result<String> {
-        reject_symlink_components(&self.path)?;
+        // 以技能自身目录为锚点复检文件本体；更上层组件在扫描时已逐级 lstat。
+        let dir = self
+            .path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("skill has no directory"))?;
+        reject_symlink_components(&self.path, dir)?;
         let text = tokio::fs::read_to_string(&self.path).await?;
         if text.len() > 1024 * 1024 {
             bail!("skill exceeds 1MiB");
@@ -120,10 +125,10 @@ impl Skill {
             .path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("skill has no directory"))?;
-        reject_symlink_components(root)?;
+        reject_symlink_components(root, root)?;
         let root = std::fs::canonicalize(root)?;
         let candidate = root.join(relative);
-        reject_symlink_components(&candidate)?;
+        reject_symlink_components(&candidate, &root)?;
         let candidate = std::fs::canonicalize(candidate)?;
         if !candidate.starts_with(&root) || !candidate.is_file() {
             bail!("skill resource escapes its directory or is not a file");
@@ -153,18 +158,23 @@ impl Skill {
             .any(|pattern| glob_tool_match(pattern, name)))
     }
 }
-fn reject_symlink_components(path: &Path) -> Result<()> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        // On Windows a drive prefix such as `C:` is not itself a filesystem
-        // entry (`symlink_metadata("C:")` returns ERROR_INVALID_FUNCTION).
-        // Keep it in the accumulated path, but only inspect an actual root or
-        // normal component. This preserves the component-by-component
-        // symlink check on both Unix and Windows.
+fn reject_symlink_components(path: &Path, anchor: &Path) -> Result<()> {
+    // 只检查受管根（anchor）之下的组件：anchor 本身与其到 path 的相对部分
+    // 逐组件 lstat。系统级祖先（macOS 的 /var、/tmp 是指向 private/* 的符号
+    // 链接）不属于 skill 管理范围，不参与检查，否则会把合法路径误判为逃逸；
+    // 根内部的链接逃逸防护保持完全严格。
+    let relative = path
+        .strip_prefix(anchor)
+        .map_err(|_| anyhow::anyhow!("skill path {} escapes its managed root", path.display()))?;
+    let mut current = anchor.to_path_buf();
+    if std::fs::symlink_metadata(&current)?
+        .file_type()
+        .is_symlink()
+    {
+        bail!("symlink skill paths are not allowed");
+    }
+    for component in relative.components() {
         current.push(component.as_os_str());
-        if matches!(component, std::path::Component::Prefix(_)) {
-            continue;
-        }
         if std::fs::symlink_metadata(&current)?
             .file_type()
             .is_symlink()
@@ -280,6 +290,7 @@ impl SkillRegistry {
         fn scan(
             path: &Path,
             depth: u32,
+            root: &Path,
             skills: &mut BTreeMap<String, Skill>,
             diagnostics: &mut Vec<String>,
             ignores: &[Gitignore],
@@ -311,7 +322,7 @@ impl SkillRegistry {
                 if path.file_name().is_none_or(|name| name != "SKILL.md") {
                     return;
                 }
-                match Skill::read_metadata(path) {
+                match Skill::read_metadata(path, root) {
                     Ok(skill) => {
                         if skills.contains_key(&skill.name) {
                             diagnostics.push(format!(
@@ -354,11 +365,11 @@ impl SkillRegistry {
                 }) {
                     continue;
                 }
-                scan(&path, depth + 1, skills, diagnostics, &ignores);
+                scan(&path, depth + 1, root, skills, diagnostics, &ignores);
             }
         }
         for root in roots {
-            scan(root, 0, &mut skills, &mut diagnostics, &[]);
+            scan(root, 0, root, &mut skills, &mut diagnostics, &[]);
         }
         Ok(Self {
             roots: Arc::new(roots.to_vec()),
