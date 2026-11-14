@@ -167,7 +167,7 @@ pub struct AgentRuntime {
     live: broadcast::Sender<TaskProgress>,
     permits: Arc<Semaphore>,
     plugin_changes: Mutex<()>,
-    _store_lock: std::fs::File,
+    _store_lock: std::sync::Mutex<Option<std::fs::File>>,
 }
 impl AgentRuntime {
     pub fn builder(config: RuntimeConfig) -> RuntimeBuilder {
@@ -312,7 +312,7 @@ impl AgentRuntime {
             sessions_store,
             projects,
             attachments,
-            _store_lock: store_lock,
+            _store_lock: std::sync::Mutex::new(Some(store_lock)),
         });
         runtime.tools.bind_objects(runtime.objects.clone());
         runtime
@@ -1274,6 +1274,14 @@ impl AgentRuntime {
         self.sessions_store.get(id).await
     }
     pub async fn shutdown(&self) -> Result<()> {
+        // 显式释放数据目录锁：shutdown 之后运行时不再写盘；即使仍有 Arc 引用
+        // 未完全退出，也不阻塞同一数据目录上的下一个运行时（Linux 的 flock
+        // 对同进程的另一个 fd 描述符同样互斥，必须主动解锁）。
+        if let Ok(mut guard) = self._store_lock.lock()
+            && let Some(file) = guard.take()
+        {
+            let _ = fs2::FileExt::unlock(&file);
+        }
         for task in self.active.read().await.values() {
             task.cancel.cancel();
         }

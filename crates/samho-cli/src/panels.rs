@@ -63,22 +63,45 @@ pub(crate) async fn confined(
             format!("workspace 根不可用：{e}"),
         )
     })?;
-    let check = if must_exist {
-        tokio::fs::canonicalize(&target).await
+    let canonical = if must_exist {
+        tokio::fs::canonicalize(&target)
+            .await
+            .map_err(|_| bad("路径不存在"))?
     } else {
-        match &target.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => tokio::fs::canonicalize(parent)
-                .await
-                .map(|p| p.join(target.file_name().unwrap_or_default())),
-            _ => Ok(target.clone()),
+        // 新路径允许携带多级尚不存在的目录（与工具侧多级创建一致）：
+        // 向上找到最近的既有祖先做 canonicalize 复核，再把词法余量拼回去，
+        // 越界检查语义不变；既有祖先若是符号链接会被解析并拦截。
+        let mut prefix = target.clone();
+        let mut remainder: Vec<std::ffi::OsString> = Vec::new();
+        loop {
+            match tokio::fs::canonicalize(&prefix).await {
+                Ok(base) => {
+                    let mut resolved = base;
+                    for component in remainder.iter().rev() {
+                        resolved.push(component);
+                    }
+                    break resolved;
+                }
+                Err(_) => {
+                    let name = prefix
+                        .file_name()
+                        .ok_or_else(|| bad("路径不存在"))?
+                        .to_os_string();
+                    remainder.push(name);
+                    let parent = prefix
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .ok_or_else(|| bad("路径不存在"))?;
+                    prefix = parent.to_path_buf();
+                }
+            }
         }
     };
-    let canonical = check.map_err(|_| bad("路径不存在"))?;
     if canonical != root_canonical && !canonical.starts_with(&root_canonical) {
         return Err(bad("路径越界：越出 workspace"));
     }
     // 新建路径（写入/改名目标）：目标本身若是符号链接（含悬空），写入会跟随
-    // 链接落盘；此处显式拒绝，配合父目录 canonicalize 复核覆盖两条逃逸路径。
+    // 链接落盘；此处显式拒绝，配合祖先 canonicalize 复核覆盖两条逃逸路径。
     if !must_exist
         && let Ok(meta) = tokio::fs::symlink_metadata(&target).await
         && meta.is_symlink()

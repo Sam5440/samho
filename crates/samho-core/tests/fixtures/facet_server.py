@@ -55,9 +55,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(200, {"protocol": PROTOCOL, "call_id": call_id, "result": {"echo": data.get("input"), "trace_id": data.get("trace_id"), "session_id": data.get("session_id"), "parent_span_id": data.get("parent_span_id"), "pid": os.getpid()}})
 
 
-port = int(os.environ.get("SAMHO_FIXTURE_FACET_PORT", "399"))
-if not 300 <= port <= 400:
-    raise RuntimeError("SAMHO_FIXTURE_FACET_PORT must be within 300-400")
+port = int(os.environ.get("SAMHO_FIXTURE_FACET_PORT", "1399"))
+if not 1300 <= port <= 1400:
+    raise RuntimeError("SAMHO_FIXTURE_FACET_PORT must be within 1300-1400")
 server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
 print(server.server_address[1], flush=True)
 server.serve_forever()

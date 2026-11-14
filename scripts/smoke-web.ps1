@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateRange(300, 400)][int]$Port = 374,
+    [ValidateRange(1300, 1400)][int]$Port = 1374,
     [string]$BinaryPath = "",
     # 报告默认拒绝覆盖已有验证证据；显式 -Force 才允许重写。
     [switch]$Force

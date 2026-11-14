@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/Sam5440/samho/actions/workflows/ci.yml/badge.svg)](https://github.com/Sam5440/samho/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange?logo=rust)
+![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange?logo=rust)
 ![Tests](https://img.shields.io/badge/tests-201%20passing-brightgreen)
 
 <img src="docs/assets/workbench.png" alt="Samho Web 工作台" width="920"/>
@@ -58,7 +58,7 @@ Samho 把一个编码智能体所需的全部基础设施——异步运行时�
 
 | 依赖 | 版本 | 用途 |
 | --- | --- | --- |
-| Rust | 1.88+ | 构建与运行全部组件 |
+| Rust | 1.89+ | 构建与运行全部组件 |
 | Python | 3.x | 仅 MCP stdio 集成测试需要 |
 | Node.js | 22+ | 仅修改 Web 工作台源码时需要；运行服务不需要（`web/dist` 已随仓库提交） |
 
@@ -165,7 +165,7 @@ npm --prefix web/app run build
 ```
 
 - 本机验收脚本默认拒绝覆盖既有报告，重跑需显式 `-Force`（PowerShell）或 `--force`（Python）：`scripts/smoke-web.ps1`、`scripts/benchmark-runtime.ps1`、`scripts/smoke_runtime.py`
-- CI 覆盖 Windows/Linux/macOS 三平台 + Rust 1.88 MSRV 检查 + RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级
+- CI 覆盖 Windows/Linux/macOS 三平台 + Rust 1.89 MSRV 检查 + RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级
 
 ## 🗺️ 路线图
 
@@ -202,7 +202,7 @@ npm --prefix web/app run build
 | [存储生命周期](docs/storage-lifecycle.md) | journal、会话检查点与迁移语义 |
 | [轨迹流式协议](docs/provider-streaming.md) | Provider 流式事件与推理增量 |
 | [远程 Facet](docs/remote-facets.md) | 握手协议、认证与网络策略 |
-| [测试端口策略](docs/test-port-policy.md) | 本地 fixture 的 300–400 端口约束 |
+| [测试端口策略](docs/test-port-policy.md) | 本地 fixture 的 1300–1400 端口约束 |
 
 ## 🤝 参与贡献
 

@@ -91,7 +91,7 @@ Samho 是一个**本地优先的 Agent 运行时**：以 Rust 从零实现 Agent
 | --- | --- |
 | workspace 版本 | `1.0.0` |
 | Rust edition | 2024 |
-| MSRV | 1.88（CI 独立 job 验证） |
+| MSRV | 1.89（CI 独立 job 验证） |
 | resolver | `"2"`（`Cargo.toml` 显式声明） |
 | 许可证 | MIT |
 | release profile | `lto = "thin"`、`codegen-units = 1`、`panic = "abort"` |
@@ -128,7 +128,7 @@ samho/                            # 仓库根
 │   │   │   ├── facet.rs            # samho-facet/1 远程 Object 适配器
 │   │   │   ├── projects.rs         # 项目存储（projects.json）
 │   │   │   ├── attachments.rs      # 会话附属终端/浏览器（attachments.json）
-│   │   │   ├── test_support.rs     # 测试端口 301–399 助手
+│   │   │   ├── test_support.rs     # 测试端口 1301–1399 助手
 │   │   │   └── lib.rs
 │   │   └── tests/                  # 10 个集成测试文件 + fixtures/
 │   └── samho-cli/                  # package 名 samho，二进制 samho
@@ -189,7 +189,7 @@ samho/                            # 仓库根
 
 ### 4.1 前置条件
 
-- Rust ≥ 1.88（CI 用 stable，另有 1.88.0 MSRV job）。
+- Rust ≥ 1.89（CI 用 stable，另有 1.89.0 MSRV job）。
 - Python 3：MCP stdio 集成测试与 `scripts/*.py`。
 - Node 22：前端构建（`web/app`，Vite 8 / TypeScript）与网页契约测试；浏览器验收脚本使用原生 WebSocket/CDP，需要本机 Chrome。
 - Windows 上 `cargo test` 会真实启动 `git` 与 PowerShell/ConPTY 的测试；Linux/macOS 对应 `sh`。
@@ -268,10 +268,10 @@ python scripts/smoke_runtime.py --binary target/release/samho
 
 ### 4.6 测试端口策略
 
-- 所有测试、fixture、OAuth 回调、浏览器 CDP、smoke 脚本只允许 **300–400**。
-- Rust 测试端口由 `samho_core::test_support::bind_loopback()` 在 **301–399** 轮询。
-- `smoke_runtime.py` 默认从 373 开始找空闲端口；`smoke-web.ps1` 默认 374。
-- 生产运行不受此限制；“300–400”只是测试约束。
+- 所有测试、fixture、OAuth 回调、浏览器 CDP、smoke 脚本只允许 **1300–1400**。
+- Rust 测试端口由 `samho_core::test_support::bind_loopback()` 在 **1301–1399** 轮询。
+- `smoke_runtime.py` 默认从 1373 开始找空闲端口；`smoke-web.ps1` 默认 1374。
+- 生产运行不受此限制；“1300–1400”只是测试约束。低于 1024 的端口在 Linux/macOS 需要特权，不作为测试范围。
 
 ---
 
@@ -858,7 +858,7 @@ task.done | task.failed | task.cancelled
 - 未实现并会显式返回 `Unsupported`：OAuth metadata discovery、动态 client registration、URL elicitation、modern subscriptions/listen、`server/discover`、非 task MRTR、stdio 自动重连、外部 `$ref`。
 - 工具公开名 `mcp__{server}__{normalized}`。
 - 状态：`disabled|failed|connected|degraded|closed`；单个 server 失败不阻塞其他 server。
-- `mcp/oauth.rs` 是**独立**的 Authorization Code + PKCE 客户端（回环回调，端口 300–400），**没有接入 RuntimeConfig/McpServerConfig**；不要把它当作 MCP 自动 OAuth。
+- `mcp/oauth.rs` 是**独立**的 Authorization Code + PKCE 客户端（回环回调，端口 1300–1400），**没有接入 RuntimeConfig/McpServerConfig**；不要把它当作 MCP 自动 OAuth。
 
 ### 7.13 `facet.rs` — Remote Facet
 
@@ -1209,7 +1209,7 @@ node --test scripts/test-workbench-contracts.mjs
 | Job | 内容 |
 | --- | --- |
 | `contracts` | ubuntu/windows/macos 矩阵：fmt → 前端 `npm ci` + build + `git diff --exit-code web/dist` → test → clippy → Node 契约 + 产物检查 → release 构建 → `smoke_runtime.py` → 上传 `reports/ci-smoke.json` |
-| `msrv` | ubuntu + Rust 1.88.0：`cargo check` + `cargo test` |
+| `msrv` | ubuntu + Rust 1.89.0：`cargo check` + `cargo test` |
 | `audit` | RustSec 公告扫描 |
 
 第三方 Action 全部固定 commit SHA；Dependabot 每周只更新 GitHub Actions。CI 不跑浏览器验收与基准。
@@ -1299,7 +1299,7 @@ node --test scripts/test-workbench-contracts.mjs
 5. **副作用未知**：已调用工具/远程服务后失败，错误必须说明“效果未知，需人工核对”，恢复时不得自动重放。
 6. **错误具体**：禁止静默回退；Provider 失败不得回退到 Demo；MCP 未实现能力返回 `Unsupported`。
 7. **原子写**：临时文件 + rename；JSONL 失败回滚偏移；SQLite 用事务；只有完整校验后才截断崩溃尾部。
-8. **端口**：测试/fixture 只用 300–400；生产端口不限。
+8. **端口**：测试/fixture 只用 1300–1400；生产端口不限。
 9. **证据**：新功能先补 fixture/契约测试，再宣称“已实现”；区分“本地 fixture 验证”与“真实供应商/跨平台验收”。
 10. **文案**：用户可见中文；事件 kind、payload 键、配置键、日志键保持英文。
 11. **文档同步**：改行为后更新本文件对应章节、README 与相关 docs 文档。

@@ -1,18 +1,18 @@
 //! Test/fixture networking helpers.
 //!
 //! Integration tests in this workspace intentionally use only loopback ports
-//! 300 through 400. `bind_loopback` reserves a port by returning the listener;
+//! 1300 through 1400. `bind_loopback` reserves a port by returning the listener;
 //! callers should pass that listener to their HTTP server task.
 
 use std::io;
 use std::sync::atomic::{AtomicU16, Ordering};
 use tokio::net::TcpListener;
 
-const FIRST_PORT: u16 = 301;
-const LAST_PORT: u16 = 399;
+const FIRST_PORT: u16 = 1301;
+const LAST_PORT: u16 = 1399;
 static NEXT_PORT: AtomicU16 = AtomicU16::new(FIRST_PORT);
 
-/// Bind an available loopback listener from the test-only 300-400 range.
+/// Bind an available loopback listener from the test-only 1300-1400 range.
 ///
 /// A fixed range is required by the repository's test policy. Ports are tried
 /// in a round-robin order and the successful listener remains bound, so two
@@ -30,7 +30,7 @@ pub async fn bind_loopback() -> io::Result<TcpListener> {
     }
     Err(io::Error::new(
         io::ErrorKind::AddrInUse,
-        "no loopback fixture port available in 301-399",
+        "no loopback fixture port available in 1301-1399",
     ))
 }
 

@@ -10,7 +10,7 @@
 
 在 Windows PTY 上启动 `samho serve` 后，`samho tui` 连接同一个服务并提交翻译任务，任务完成且显示 `demo-fast` 与 `[DEMO simulation]` 标记；退出后终端恢复。该运行使用独立临时数据目录和回环地址，未发送付费模型请求。GUI 的静态检查确认脚本无 `innerHTML`/`eval`/内联事件，资源请求使用文本节点和同源 API。真实浏览器已完成自动路由、会话续接、reasoning tier、model pin、重启恢复与 trace/Object 检查；桌面和 560×900 窄屏均无水平溢出，末次 10 个启动请求全部 200 且 console 无 error/warning；此 fixture 未配置实际 MCP/Skill，浏览器慢任务取消竞态仍未验收。
 
-本轮新增流式 Provider、上下文 lineage、重试/预算、会话 fork/steering/follow-up、SQLite journal、轨迹索引分页、Skill 权限、MCP optional/OAuth、Remote Facet 和 Web API 行为测试。所有本地 HTTP fixture 与 OAuth 回调只使用 300–400 范围（Rust 分配器实际使用 301–399）；真实模型、完整 MCP conformance、macOS/Linux 实跑与 24 小时 soak 仍未验收。持久事件查询已经提供游标分页，但大规模长时间并发写入仍需独立 soak。
+本轮新增流式 Provider、上下文 lineage、重试/预算、会话 fork/steering/follow-up、SQLite journal、轨迹索引分页、Skill 权限、MCP optional/OAuth、Remote Facet 和 Web API 行为测试。所有本地 HTTP fixture 与 OAuth 回调只使用 1300–1400 范围（Rust 分配器实际使用 1301–1399）；真实模型、完整 MCP conformance、macOS/Linux 实跑与 24 小时 soak 仍未验收。持久事件查询已经提供游标分页，但大规模长时间并发写入仍需独立 soak。
 
 ## 热路径与瓶颈假设
 

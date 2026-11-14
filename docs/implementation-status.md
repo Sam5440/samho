@@ -15,9 +15,9 @@
 
 ## 本轮测试证据
 
-`cargo test --workspace` 当前通过 **155 项**（CLI 46、core 单元 31、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9，另 0 个 doc test；2026-11-11 增量：Samho 改名与 Anthropic provider 测试、级联删除并发死锁回归、悬空符号链接拒绝（core/面板）、项目持久化失败回滚、动态工作区注册表全量持久化、任务索引字节预算、根关停级联取消动态 SSE）。`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo fmt --all -- --check` 已通过。CI 另含 Rust 1.88 MSRV 检查与 RustSec 公告扫描（见 .github/workflows/ci.yml）。
+`cargo test --workspace` 当前通过 **201 项**（CLI 89、core 单元 34、agent 6、contracts 15、facet 6、MCP 5、MCP optional 4、OAuth 3、provider streaming 15、runtime semantics 10、skill policy 5、storage lifecycle 9，另 0 个 doc test）。`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo fmt --all -- --check` 已通过。CI 另含 Rust 1.89 MSRV 检查与 RustSec 公告扫描（见 .github/workflows/ci.yml）。
 
-测试 HTTP/Facet/OAuth fixture 使用 `samho_core::test_support::bind_loopback()`，只在 301–399 中轮询并在服务启动前持有 listener；OAuth 测试回调为 301–399，脚本 smoke/Web/Chrome CDP 端口也强制 300–400。生产运行时允许用户配置任意端口与监听地址（默认 `0.0.0.0:7432`）；“300–400”是测试约束，不是模型或网络协议限制。
+测试 HTTP/Facet/OAuth fixture 使用 `samho_core::test_support::bind_loopback()`，只在 1301–1399 中轮询并在服务启动前持有 listener；OAuth 测试回调为 1301–1399，脚本 smoke/Web/Chrome CDP 端口也强制 1300–1400。生产运行时允许用户配置任意端口与监听地址（默认 `0.0.0.0:7432`）；“1300–1400”是测试约束，不是模型或网络协议限制。
 
 浏览器中文页面和计划页面已有离线 Node/CDP 验收；Web API 行为测试覆盖健康检查、任务完成、live progress、fork、UI、事件分页、timeline/export 和取消。测试只使用 Demo、trait provider 和本地 HTTP/stdio/Python fixture，没有付费模型调用。
 

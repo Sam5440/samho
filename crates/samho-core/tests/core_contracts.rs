@@ -387,7 +387,7 @@ fn runtime_config_default_and_custom_toml_roundtrip_and_validate() -> Result<()>
     let mut custom = defaults;
     custom.workspace = directory.path().join("工作区");
     custom.data_dir = directory.path().join("data");
-    custom.http_bind = "127.0.0.1:399".into();
+    custom.http_bind = "127.0.0.1:1399".into();
     custom.system_prompt = "custom\nline two".into();
     custom.max_turns = 9;
     custom.max_concurrent_tasks = 3;

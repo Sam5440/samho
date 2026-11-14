@@ -237,7 +237,7 @@ async fn registry_calls_apply_active_skill_policy_even_for_builtin_tools() -> Re
 async fn network_policy_checks_literals_allowlist_and_plaintext_boundaries() -> Result<()> {
     let policy = NetworkPolicyConfig::default();
     policy
-        .authorize_url(&reqwest::Url::parse("http://127.0.0.1:399")?)
+        .authorize_url(&reqwest::Url::parse("http://127.0.0.1:1399")?)
         .await?;
     assert!(
         policy

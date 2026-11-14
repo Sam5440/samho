@@ -30,7 +30,7 @@ pub struct OAuthConfig {
     pub resource: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    /// Optional loopback callback range. Test fixtures set this to `(301, 399)`
+    /// Optional loopback callback range. Test fixtures set this to `(1301, 1399)`
     /// to comply with the repository port policy; production clients may leave
     /// it unset to request an OS-assigned callback port.
     #[serde(default)]
@@ -345,8 +345,8 @@ impl OAuthClient {
 }
 
 async fn bind_loopback_range(first: u16, last: u16) -> Result<TcpListener> {
-    if !(300..=400).contains(&first) || !(300..=400).contains(&last) || first > last {
-        bail!("OAuth callback port range must be within 300-400");
+    if !(1300..=1400).contains(&first) || !(1300..=1400).contains(&last) || first > last {
+        bail!("OAuth callback port range must be within 1300-1400");
     }
     for port in first..=last {
         match TcpListener::bind(("127.0.0.1", port)).await {

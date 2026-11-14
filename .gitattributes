@@ -1,3 +1,6 @@
 # web/dist 是 Vite 构建产物（include_str! 内嵌进二进制）；固定 LF，使各平台检出与重新构建逐字节一致，
 # CI 的“构建产物与源码同步”检查才可在 Windows 上通过。
 web/dist/** text eol=lf
+# 模板与前端源码同样固定 LF：Windows 检出默认 autocrlf 会把模板变成 CRLF，
+# vite 会把模板行尾带进构建产物，使产物与提交不一致、产物同步门禁失败。
+web/app/** text eol=lf

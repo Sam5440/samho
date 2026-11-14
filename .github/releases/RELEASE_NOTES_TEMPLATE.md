@@ -116,7 +116,7 @@ max_output_tokens = 32768
 
 ## 🛠️ 从源码构建（可选）
 
-需要 Rust 1.88+（修改 Web 工作台另需 Node 22）：
+需要 Rust 1.89+（修改 Web 工作台另需 Node 22）：
 
 ```bash
 git clone https://github.com/Sam5440/samho.git

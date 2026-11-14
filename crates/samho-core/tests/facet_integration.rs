@@ -277,9 +277,9 @@ async fn handshake_version_network_policy_and_response_limit_fail_closed() {
 
 #[tokio::test]
 async fn disconnected_endpoint_is_network_error_without_any_unauthenticated_retry() {
-    // 300 is reserved for the intentionally disconnected fixture; all test
-    // endpoints stay inside the 300-400 policy range.
-    let cfg = config("http://127.0.0.1:300".into());
+    // 1300 is reserved for the intentionally disconnected fixture; all test
+    // endpoints stay inside the 1300-1400 policy range.
+    let cfg = config("http://127.0.0.1:1300".into());
     let error = connect(cfg).await.unwrap_err();
     assert!(matches!(
         error.kind,
@@ -295,7 +295,7 @@ async fn separate_process_handshake_call_cancel_and_disconnect() {
     let mut child = tokio::process::Command::new("python")
         .arg(path)
         .env("SAMHO_FIXTURE_FACET_TOKEN", "facet-secret")
-        .env("SAMHO_FIXTURE_FACET_PORT", "399")
+        .env("SAMHO_FIXTURE_FACET_PORT", "1399")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)

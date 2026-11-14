@@ -25,7 +25,7 @@ regex.workspace = true
 rmcp.workspace = true
 tracing.workspace = true
 fs2 = "0.4"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 sha2 = "0.10"
 jsonschema = { version = "0.33", default-features = false }
 ignore = "0.4"

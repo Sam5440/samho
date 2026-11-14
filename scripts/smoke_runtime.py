@@ -28,10 +28,10 @@ def main():
     parser.add_argument("--binary", default="target/release/samho")
     parser.add_argument("--report", default="reports/ci-smoke.json")
     parser.add_argument("--force", action="store_true", help="允许覆盖已存在的报告文件")
-    parser.add_argument("--port", type=int, default=373)
+    parser.add_argument("--port", type=int, default=1373)
     args = parser.parse_args()
-    if not 300 <= args.port <= 400:
-        raise SystemExit("测试服务端口必须在 300-400")
+    if not 1300 <= args.port <= 1400:
+        raise SystemExit("测试服务端口必须在 1300-1400")
     binary = Path(args.binary).resolve()
     if os.name == "nt" and not binary.suffix:
         binary = binary.with_suffix(".exe")
@@ -42,7 +42,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="samho-smoke-") as root:
         root = Path(root)
         with socket.socket() as reservation:
-            candidates = list(range(args.port, 401)) + list(range(300, args.port))
+            candidates = list(range(args.port, 1401)) + list(range(1300, args.port))
             for candidate in candidates:
                 try:
                     reservation.bind(("127.0.0.1", candidate))
@@ -50,7 +50,7 @@ def main():
                 except OSError:
                     continue
             else:
-                raise RuntimeError("300-400 范围内没有可用测试端口")
+                raise RuntimeError("1300-1400 范围内没有可用测试端口")
             port = reservation.getsockname()[1]
         base = f"http://127.0.0.1:{port}"
         env = os.environ.copy()

@@ -101,7 +101,7 @@ async fn fixture(
             scopes: vec!["tools".into()],
             resource: Some("https://example.test/mcp".into()),
             timeout_ms,
-            callback_port_range: Some((301, 399)),
+            callback_port_range: Some((1301, 1399)),
         },
         Arc::new(MemoryCredentialStore::default()),
     )?);
@@ -248,7 +248,7 @@ async fn reserved_authorization_query_and_non_https_remote_endpoints_are_rejecte
         scopes: vec![],
         resource: None,
         timeout_ms: 500,
-        callback_port_range: Some((301, 399)),
+        callback_port_range: Some((1301, 1399)),
     };
     assert!(
         OAuthClient::new(config.clone(), Arc::new(MemoryCredentialStore::default()))?
