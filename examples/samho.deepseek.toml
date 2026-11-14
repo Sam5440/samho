@@ -1,0 +1,44 @@
+# Samho 默认 API 示例配置（OpenAI 兼容网关，2026-11-12）
+# 默认 API：http://127.0.0.1:3425/v1 ｜ 模型 wuyou/deepseek-v4.1-flash ｜ Chat Completions 协议
+# 密钥只从环境变量读取：export SAMHO_API_KEY=magpie（Windows: setx SAMHO_API_KEY magpie）
+#
+# 与 `samho config init` 模板等价，额外给出并发与日志常用覆盖项。省略的节回退内置默认值。
+
+workspace = "."
+data_dir = ".samho"
+http_bind = "0.0.0.0:7432"
+max_turns = 40
+max_concurrent_tasks = 2
+request_timeout_ms = 600000
+max_tool_output_bytes = 65536
+streaming = true
+
+[tools]
+shell_timeout_ms = 120000
+
+[retry]
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 8000
+reroute = true
+
+[budget]
+max_task_tokens = 4000000
+
+[[models]]
+id = "deepseek-v4.1-flash"    # RoleRouter 默认绑定按此 id 匹配，全部任务类型自动路由到此
+model = "wuyou/deepseek-v4.1-flash"
+provider = "chat_completions"
+tier = "reasoning"
+base_url = "http://127.0.0.1:3425/v1"
+api_key_env = "SAMHO_API_KEY"
+context_window = 272000
+max_output_tokens = 32768     # 思考 token 计入输出，必须给足
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+streaming = true
+output_token_parameter = "max_tokens"
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+latency_ms = 3000

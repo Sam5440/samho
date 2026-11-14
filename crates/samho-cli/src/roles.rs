@@ -13,8 +13,9 @@ use anyhow::{Context, Result};
 use samho_core::{ModelDescriptor, ModelRouter, RouteDecision, TaskProfile, TaskRouter};
 use serde_json::{Value, json};
 
-/// 模型清单里作为「任务类型默认模型」的 id（不区分大小写）。
-const DEFAULT_MODEL_ID: &str = "glm-5.3-flash";
+/// 模型清单里作为「任务类型默认模型」的 id（不区分大小写，按顺序取第一个已配置者）。
+/// deepseek-v4.1-flash 为当前默认 API；glm-5.3-flash 兼容旧版 `config init` 生成的配置。
+const DEFAULT_MODEL_IDS: &[&str] = &["deepseek-v4.1-flash", "glm-5.3-flash"];
 
 pub(crate) struct ModelRoles {
     /// None = 不落盘（测试用 detached 实例）。
@@ -35,7 +36,7 @@ impl ModelRoles {
         })
     }
 
-    /// 读取持久化文件；缺失的层级补默认模型（GLM-5.3-Flash 若已配置，
+    /// 读取持久化文件；缺失的层级补默认模型（DEFAULT_MODEL_IDS 中首个已配置者，
     /// 否则空 = 跟随自动路由）。未知层级与未知模型条目直接丢弃。
     pub(crate) fn load(path: PathBuf, config: &samho_core::RuntimeConfig) -> Self {
         let tiers: Vec<String> = config
@@ -129,10 +130,12 @@ impl ModelRoles {
 }
 
 fn default_model_for(models: &[ModelDescriptor]) -> Option<String> {
-    models
-        .iter()
-        .find(|model| model.id.eq_ignore_ascii_case(DEFAULT_MODEL_ID))
-        .map(|model| model.id.clone())
+    DEFAULT_MODEL_IDS.iter().find_map(|default| {
+        models
+            .iter()
+            .find(|model| model.id.eq_ignore_ascii_case(default))
+            .map(|model| model.id.clone())
+    })
 }
 
 /// 包装运行时默认路由器：decide 出结果后按任务类型改绑模型。
@@ -275,6 +278,25 @@ mod tests {
                 .id,
             "demo-nano"
         );
+    }
+
+    #[test]
+    fn default_binding_prefers_deepseek_then_glm() {
+        let both = test_config(&[
+            ("glm-5.3-flash", ModelTier::Balanced),
+            ("deepseek-v4.1-flash", ModelTier::Reasoning),
+        ]);
+        assert_eq!(
+            default_model_for(&both.models).as_deref(),
+            Some("deepseek-v4.1-flash")
+        );
+        let legacy = test_config(&[("glm-5.3-flash", ModelTier::Balanced)]);
+        assert_eq!(
+            default_model_for(&legacy.models).as_deref(),
+            Some("glm-5.3-flash")
+        );
+        let none = test_config(&[("demo-nano", ModelTier::Nano)]);
+        assert_eq!(default_model_for(&none.models), None);
     }
 
     #[tokio::test]

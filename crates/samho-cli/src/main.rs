@@ -66,37 +66,43 @@ enum ConfigCommand {
     },
 }
 
-/// `config init` 生成的默认模板：接入本机 Anthropic 协议网关。
-/// 模型 id 与 RoleRouter 的默认绑定（DEFAULT_MODEL_ID = "glm-5.3-flash"）
+/// `config init` 生成的默认模板：接入本机 OpenAI 兼容网关（Chat Completions）。
+/// 模型 id 与 RoleRouter 的默认绑定（DEFAULT_MODEL_IDS 首项 "deepseek-v4.1-flash"）
 /// 一致，因此所有任务类型自动路由到该模型；省略的配置节回退内置默认值。
 const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Samho 运行时配置（`samho config init` 生成）
-# 默认 API：http://127.0.0.1:3425 ｜ 模型 auto/glm-5.3-flash ｜ Anthropic Messages 协议
+# 默认 API：http://127.0.0.1:3425/v1 ｜ 模型 wuyou/deepseek-v4.1-flash ｜ OpenAI Chat Completions 协议
 # 认证密钥只从环境变量读取：Git Bash `export SAMHO_API_KEY=magpie`；Windows `setx SAMHO_API_KEY magpie`
 
 display_name = "Samho"
 workspace = "."
 data_dir = ".samho"
 http_bind = "0.0.0.0:7432"
-max_turns = 30
-request_timeout_ms = 300000
+max_turns = 40
+request_timeout_ms = 600000
 streaming = true
 
 [tools]
-shell_timeout_ms = 60000
+shell_timeout_ms = 120000
+
+[retry]
+max_attempts = 3
+initial_backoff_ms = 500
+max_backoff_ms = 8000
 
 [budget]
-max_task_tokens = 2000000
+max_task_tokens = 4000000
 
 [[models]]
-id = "glm-5.3-flash"          # 与内置默认模型绑定一致，全部任务类型自动路由到此
-model = "auto/glm-5.3-flash"
-provider = "anthropic"        # /v1/messages；框架内部消息与会话日志保持 OpenAI 风格
+id = "deepseek-v4.1-flash"    # 与内置默认模型绑定一致，全部任务类型自动路由到此
+model = "wuyou/deepseek-v4.1-flash"
+provider = "chat_completions" # POST {base_url}/chat/completions，流式 SSE + reasoning_content
 tier = "reasoning"
-base_url = "http://127.0.0.1:3425"
+base_url = "http://127.0.0.1:3425/v1"
 api_key_env = "SAMHO_API_KEY"
-context_window = 128000
-max_output_tokens = 16384     # 该网关 thinking token 计入 max_tokens，必须给足
+context_window = 272000
+max_output_tokens = 32768     # 思考 token 计入输出，必须给足
 supports_tools = true
+supports_vision = true
 supports_reasoning = true
 streaming = true
 output_token_parameter = "max_tokens"
@@ -143,11 +149,11 @@ async fn main() -> Result<()> {
     } = &cli.command
     {
         anyhow::ensure!(!path.exists(), "配置文件已存在：{}", path.display());
-        // 2026-11-10 起 config init 默认生成本机 Anthropic 协议网关模板；
+        // 2026-11-12 起 config init 默认生成本机 OpenAI 兼容网关模板（deepseek-v4.1-flash）；
         // 省略的配置节在加载时回退内置默认值（serde default）。
         std::fs::write(path, DEFAULT_CONFIG_TEMPLATE)?;
         println!(
-            "已创建 {}。默认接入 Anthropic 网关 http://127.0.0.1:3425（auto/glm-5.3-flash）；请先设置环境变量 SAMHO_API_KEY。",
+            "已创建 {}。默认接入 OpenAI 兼容网关 http://127.0.0.1:3425/v1（wuyou/deepseek-v4.1-flash）；请先设置环境变量 SAMHO_API_KEY。",
             path.display()
         );
         return Ok(());
