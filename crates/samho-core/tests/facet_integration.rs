@@ -289,7 +289,23 @@ async fn disconnected_endpoint_is_network_error_without_any_unauthenticated_retr
 
 #[tokio::test]
 async fn separate_process_handshake_call_cancel_and_disconnect() {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    // 环境探针：区分“解释器异常”与“fixture 自身问题”。
+    let probe = timeout(Duration::from_secs(15), async {
+        tokio::process::Command::new("python")
+            .arg("-c")
+            .arg("print('ok')")
+            .output()
+            .await
+    })
+    .await;
+    match &probe {
+        Ok(Ok(output)) => assert!(
+            String::from_utf8_lossy(&output.stdout).contains("ok"),
+            "python probe failed: {output:?}"
+        ),
+        other => panic!("python environment probe did not respond in time: {other:?}"),
+    }
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/facet_server.py");
     let mut child = tokio::process::Command::new("python")
@@ -297,17 +313,26 @@ async fn separate_process_handshake_call_cancel_and_disconnect() {
         .env("SAMHO_FIXTURE_FACET_TOKEN", "facet-secret")
         .env("SAMHO_FIXTURE_FACET_PORT", "1399")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("Python is required for local Facet process fixture");
     let process_id = child.id().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-    let port = timeout(Duration::from_secs(20), stdout.next_line())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let port = match timeout(Duration::from_secs(30), stdout.next_line()).await {
+        Ok(line) => line
+            .expect("fixture stdout closed")
+            .expect("read fixture stdout"),
+        Err(_) => {
+            child.start_kill();
+            let mut message = String::new();
+            if let Some(mut stream) = child.stderr.take() {
+                let _ = stream.read_to_string(&mut message).await;
+            }
+            let status = child.wait().await;
+            panic!("fixture did not report its port in 30s; status={status:?} stderr={message}");
+        }
+    };
     let endpoint = format!("http://127.0.0.1:{}", port.trim());
     let response = reqwest::Client::new()
         .post(format!("{endpoint}/handshake"))
