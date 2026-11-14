@@ -11,7 +11,7 @@ cargo run -p samho -- config init samho.toml
 cargo run -p samho -- --config samho.toml serve
 ```
 
-`config init` 生成推荐配置模板：默认接入本机 Anthropic 协议网关（`http://127.0.0.1:3425`，模型 `auto/glm-5.3-flash`，`provider = "anthropic"`）；模板中省略的配置节在加载时回退内置默认值。为防止覆盖，目标文件已存在时会报错。密钥只从环境变量 `SAMHO_API_KEY` 读取，不写入配置文件。配置在进程启动时读取；运行时扩展通过 `RuntimeBuilder` 和 Object API 注入。配置文件本身仍需重启服务。
+`config init` 生成推荐配置模板：默认接入本机 OpenAI 兼容网关（`http://127.0.0.1:3425/v1`，模型 `wuyou/deepseek-v4.1-flash`，`provider = "chat_completions"`，配置 id `deepseek-v4.1-flash` 即全部任务类型的默认模型）；模板中省略的配置节在加载时回退内置默认值。为防止覆盖，目标文件已存在时会报错。密钥只从环境变量 `SAMHO_API_KEY` 读取，不写入配置文件。配置在进程启动时读取；运行时扩展通过 `RuntimeBuilder` 和 Object API 注入。配置文件本身仍需重启服务。
 
 对象层已提供 scope、middleware、generation、lease、排空和失败回滚语义；编辑 TOML 不会自动触发热重载。需要热替换时，应通过受控的 Runtime API 发布新代际，并等待旧代际租约释放。
 

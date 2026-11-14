@@ -4,7 +4,7 @@ Pi coding agent 的 Rust 重写工程。已下载并分析完整上游仓库，�
 
 ## 启动
 
-需要 Rust 1.88+；MCP stdio 集成测试还需要 Python 3。
+需要 Rust 1.88+；MCP stdio 集成测试还需要 Python 3。修改 Web 工作台（`web/app`，React + shadcn/ui）需要 Node 22，构建产物 `web/dist` 已随仓库提交，只运行服务无需 Node。
 
 ```powershell
 cargo run -p samho -- serve --bind 0.0.0.0:7432
@@ -34,7 +34,7 @@ cargo run -p samho -- config init samho.toml
 cargo run -p samho -- --config samho.toml serve
 ```
 
-真实 Provider 示例见 [examples/samho.chat.toml](examples/samho.chat.toml)。填写端点、物理模型 ID、能力、费用与延迟后，通过指定环境变量读取 API key。所有模型配置均由使用者维护；分级标签和延迟提示不代表已测模型性能。
+`config init` 默认接入本机 OpenAI 兼容网关 `http://127.0.0.1:3425/v1`（模型 `wuyou/deepseek-v4.1-flash`），先设置 `SAMHO_API_KEY=magpie`；等价完整示例见 [examples/samho.deepseek.toml](examples/samho.deepseek.toml)。其他真实 Provider 示例见 [examples/samho.chat.toml](examples/samho.chat.toml)。填写端点、物理模型 ID、能力、费用与延迟后，通过指定环境变量读取 API key。所有模型配置均由使用者维护；分级标签和延迟提示不代表已测模型性能。
 
 ## 已实现
 
@@ -47,7 +47,7 @@ cargo run -p samho -- --config samho.toml serve
 - MCP stdio/Streamable HTTP；工具、资源、模板、prompts、分页、超时、取消和子进程回收，基于 `rmcp 3.5.1`。
 - `SKILL.md` frontmatter 校验、确定性发现与冲突诊断、按需正文加载及显式用户调用。
 - 工作区文件工具（read/write/edit/list_files/glob/grep/webfetch/todo）。**write 与 shell 默认开启**：shell 不是沙箱，命令以服务进程的 OS 用户权限执行，可访问 workspace 之外的系统资源；处理不可信内容时请在 `[tools]` 中显式关闭（见下文安全边界）。
-- Web GUI 与 TUI 共用 Rust 服务；任务提交/取消、会话、模型、Object、Skill、MCP 状态和 trace 查询。
+- Web GUI 与 TUI 共用 Rust 服务；任务提交/取消、会话、模型、Object、Skill、MCP 状态和 trace 查询。Web 工作台基于 React + TypeScript + Tailwind v4 + shadcn/ui，构建为单文件产物内嵌进二进制，满足服务端严格 CSP；对话完整渲染 Markdown（GFM 表格/任务清单、代码高亮、数学公式、净化后的内联 HTML），HTML 代码块与 workspace 网页可在隔离沙箱中运行预览。
 
 Runtime 已将 Session/Task 纳入 Object 生命周期，并提供 scope、middleware、lease 和 generation 热替换。远程 Facet、生产级跨进程隔离和跨平台运维仍按状态文档列为后续验收项。自定义范围和限制见 [docs/customization.md](docs/customization.md)。
 
@@ -58,9 +58,14 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
+node scripts/check-web-esm.mjs
+
+# 修改 web/app 后重新构建并提交 web/dist，再重新编译 Rust
+npm ci --prefix web/app
+npm --prefix web/app run build
 ```
 
-Rust 当前 workspace 共 **155 项测试**（CLI 46、core 单元 31、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
+Rust 当前 workspace 共 **162 项测试**（CLI 50、core 单元 34、Agent 6、契约 15、Facet 6、MCP 5、MCP optional 4、OAuth 3、Provider streaming 15、runtime semantics 10、Skill policy 5、storage lifecycle 9，另 0 个 doc test）。测试使用本地 fixture，无需供应商凭证。CI 另含 Rust 1.88 MSRV 检查与 RustSec 依赖公告扫描；第三方 Action 固定 commit SHA 并由 Dependabot 维护升级。
 
 本机验收脚本默认拒绝覆盖既有报告，重跑需显式 `-Force`（PowerShell）或 `--force`（Python）：
 
