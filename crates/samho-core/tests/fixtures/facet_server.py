@@ -1,6 +1,7 @@
 """Deterministic authenticated Facet protocol fixture; no external network."""
 import json
 import os
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -8,6 +9,16 @@ PROTOCOL = "samho-facet/1"
 TOKEN = os.environ["SAMHO_FIXTURE_FACET_TOKEN"]
 pending = {}
 lock = threading.Lock()
+
+
+class FixtureServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind 会对监听地址做 socket.getfqdn 反向 DNS；
+        # 127.0.0.1 的反查在部分 macOS 环境（DNS 解析异常时）会阻塞数十秒。
+        # fixture 不需要服务器主机名，直接绑定即可。
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,6 +69,6 @@ class Handler(BaseHTTPRequestHandler):
 port = int(os.environ.get("SAMHO_FIXTURE_FACET_PORT", "1399"))
 if not 1300 <= port <= 1400:
     raise RuntimeError("SAMHO_FIXTURE_FACET_PORT must be within 1300-1400")
-server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+server = FixtureServer(("127.0.0.1", port), Handler)
 print(server.server_address[1], flush=True)
 server.serve_forever()
