@@ -405,10 +405,17 @@ fn within_workspace(workspace: &Path, requested: &str) -> Result<PathBuf> {
         }
         Ok(canonical)
     } else {
-        let parent = candidate
+        // 目标尚不存在（含多级新目录，如 write_file 新建 `pkg/sub/file.py`）：
+        // 沿父链找到最近的已存在祖先做 canonicalize 复核；中间缺失的目录由调用方创建。
+        let mut ancestor = candidate
             .parent()
             .ok_or_else(|| anyhow::anyhow!("invalid path"))?;
-        let canonical_parent = std::fs::canonicalize(parent)?;
+        while !ancestor.exists() {
+            ancestor = ancestor
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("invalid path"))?;
+        }
+        let canonical_parent = std::fs::canonicalize(ancestor)?;
         if !canonical_parent.starts_with(&root) {
             bail!("parent escapes workspace");
         }
@@ -421,6 +428,41 @@ fn within_workspace(workspace: &Path, requested: &str) -> Result<PathBuf> {
         }
         Ok(candidate)
     }
+}
+/// 文本解码：UTF-8（去 BOM）；带 BOM 的 UTF-16LE/BE（Windows PowerShell 5.1 的 `>`
+/// 重定向与 Out-File 默认产物）也按文本读取，其余非 UTF-8 内容报错。
+fn decode_text(bytes: Vec<u8>) -> Result<String> {
+    let utf16 = |big_endian: bool| {
+        let units = bytes[2..].chunks_exact(2).map(|pair| {
+            if big_endian {
+                u16::from_be_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_le_bytes([pair[0], pair[1]])
+            }
+        });
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .context("file is not valid UTF-16")
+    };
+    match bytes.as_slice() {
+        [0xEF, 0xBB, 0xBF, ..] => {
+            String::from_utf8(bytes[3..].to_vec()).context("file is not UTF-8")
+        }
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        _ => String::from_utf8(bytes).context("file is not UTF-8"),
+    }
+}
+/// 工具结果中的 workspace 相对路径（`/` 分隔）。目标路径来自 `within_workspace`，
+/// 可能已 canonicalize（Windows 上带 `\\?\` 前缀），因此先以规范化根剥离。
+fn workspace_relative(workspace: &Path, path: &Path) -> String {
+    let canonical_root = std::fs::canonicalize(workspace).ok();
+    let relative = canonical_root
+        .as_deref()
+        .and_then(|root| path.strip_prefix(root).ok())
+        .or_else(|| path.strip_prefix(workspace).ok())
+        .unwrap_or(path);
+    relative.to_string_lossy().replace('\\', "/")
 }
 struct ReadFileTool {
     workspace: PathBuf,
@@ -467,12 +509,8 @@ impl Object for ReadFileTool {
         if bytes.len() > self.max_bytes {
             bail!("file exceeds configured output limit");
         }
-        let content = String::from_utf8(bytes).context("file is not UTF-8")?;
-        let rel = path
-            .strip_prefix(&self.workspace)
-            .unwrap_or(&path)
-            .display()
-            .to_string();
+        let content = decode_text(bytes)?;
+        let rel = workspace_relative(&self.workspace, &path);
         let total_lines = content.lines().count();
         let offset = input.get("offset").and_then(Value::as_u64).unwrap_or(1);
         let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(0);
@@ -543,9 +581,7 @@ impl Object for WriteFileTool {
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(&path, content).await?;
-        Ok(
-            json!({"path":path.strip_prefix(&self.workspace).unwrap_or(&path).display().to_string(),"bytes":content.len()}),
-        )
+        Ok(json!({"path":workspace_relative(&self.workspace, &path),"bytes":content.len()}))
     }
 }
 struct LoadSkillTool {
@@ -593,6 +629,27 @@ struct ShellTool {
     max_bytes: usize,
     timeout_ms: u64,
 }
+/// Windows shell 包装：UTF-8 输出 + 文件类 cmdlet 默认 UTF-8（5.1 默认 ANSI/UTF-16，会把
+/// UTF-8 源码读写成乱码）+ 在当前作用域执行用户脚本 + 保留最后语句的成功状态。
+/// 用户脚本中的 `exit N` 直接结束进程；原生命令失败沿用其 $LASTEXITCODE。
+const WINDOWS_SHELL_WRAPPER: &str = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); \
+$OutputEncoding = [Console]::OutputEncoding; \
+foreach ($c in 'Get-Content','Set-Content','Add-Content','Out-File','Select-String','Import-Csv','Export-Csv') \
+{ $PSDefaultParameterValues[\"${c}:Encoding\"] = 'utf8' }; $global:LASTEXITCODE = 0; \
+. ([ScriptBlock]::Create($env:SAMHO_SHELL_COMMAND + \"`n\" + '$global:SamhoShellOk = $?')); \
+if ($LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $global:SamhoShellOk) { exit 1 }";
+/// 告知模型实际 shell 方言，避免在 Windows PowerShell 5.1 中使用 `&&`/`||` 等 bash 语法。
+fn shell_description() -> &'static str {
+    if cfg!(windows) {
+        "Run a command in the workspace root using Windows PowerShell 5.1 (each call is a fresh process; \
+cwd resets to the workspace root). PowerShell syntax only: chain with `;` (no `&&`/`||`), \
+use `if ($LASTEXITCODE -ne 0) { ... }` for conditionals, `New-Item -ItemType Directory -Force` instead of `mkdir -p`, \
+`Get-ChildItem -Force` instead of `ls -a`, `Select-Object -Last N` instead of `tail`. \
+Prefer the file tools for creating/editing files; parent directories are created automatically."
+    } else {
+        "Run a POSIX `sh -c` command in the workspace root (each call is a fresh process; cwd resets to the workspace root)"
+    }
+}
 async fn capture(
     mut reader: impl tokio::io::AsyncRead + Unpin,
     max_bytes: usize,
@@ -618,11 +675,7 @@ async fn capture(
 #[async_trait]
 impl Object for ShellTool {
     fn envelope(&self) -> ObjectEnvelope {
-        let mut envelope = ObjectEnvelope::new(
-            "tool:shell",
-            ObjectKind::Tool,
-            "Run an explicitly enabled shell command in the workspace",
-        );
+        let mut envelope = ObjectEnvelope::new("tool:shell", ObjectKind::Tool, shell_description());
         envelope.spec = json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false});
         envelope
     }
@@ -642,8 +695,21 @@ impl Object for ShellTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("command is required"))?;
         let mut command = if cfg!(windows) {
+            // 脚本经环境变量传入 ScriptBlock：先把控制台输出切到 UTF-8（否则中文系统按
+            // GBK 输出，解码后模型只能看到乱码，包括解析错误），再在当前作用域执行，
+            // 末尾捕获最后一条语句的 $? 以保持 `-Command` 的退出码语义。
             let mut command = tokio::process::Command::new("powershell.exe");
-            command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+            command
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    WINDOWS_SHELL_WRAPPER,
+                ])
+                .env("SAMHO_SHELL_COMMAND", script);
+            if std::env::var_os("PYTHONUTF8").is_none() {
+                command.env("PYTHONUTF8", "1");
+            }
             command
         } else {
             let mut command = tokio::process::Command::new("sh");
@@ -1854,6 +1920,64 @@ mod tests {
         }
     }
 
+    async fn shell_call(workspace: &Path, command: &str) -> Value {
+        let tool = ShellTool {
+            workspace: workspace.to_path_buf(),
+            max_bytes: 64 * 1024,
+            timeout_ms: 60_000,
+        };
+        tool.invoke("call", json!({ "command": command }), test_context())
+            .await
+            .unwrap()
+    }
+
+    /// 回归：中文 Windows 上 PowerShell 默认按 GBK 输出，模型看到的报错/输出全是乱码；
+    /// 包装后输出为 UTF-8，且退出码语义（成功 0、原生命令非零、exit N、cmdlet 失败）保持不变。
+    #[tokio::test]
+    async fn shell_outputs_utf8_and_preserves_exit_codes() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = shell_call(dir.path(), "echo 中文输出").await;
+        assert_eq!(ok["exit_code"], json!(0), "{ok}");
+        assert!(ok["stdout"].as_str().unwrap().contains("中文输出"), "{ok}");
+        let exit = shell_call(dir.path(), "echo before; exit 7").await;
+        assert_eq!(exit["exit_code"], json!(7), "{exit}");
+        assert!(exit["stdout"].as_str().unwrap().contains("before"));
+        assert_eq!(exit["is_error"], json!(true));
+        if cfg!(windows) {
+            let native = shell_call(dir.path(), "cmd /c exit 3").await;
+            assert_eq!(native["exit_code"], json!(3), "{native}");
+            let failed = shell_call(dir.path(), "Get-Item missing-zz").await;
+            assert_eq!(failed["exit_code"], json!(1), "{failed}");
+            let stderr = failed["stderr"].as_str().unwrap();
+            assert!(
+                stderr.contains("missing-zz") && !stderr.contains('\u{fffd}'),
+                "{stderr}"
+            );
+            let recovered = shell_call(dir.path(), "Get-Item missing-zz; echo after").await;
+            assert_eq!(recovered["exit_code"], json!(0), "{recovered}");
+            let variables = shell_call(dir.path(), "$x = 5; Write-Output \"x=$x\"").await;
+            assert!(
+                variables["stdout"].as_str().unwrap().contains("x=5"),
+                "{variables}"
+            );
+            // 文件 cmdlet 默认 UTF-8：就地改写 UTF-8 源码不得损坏中文。
+            std::fs::write(dir.path().join("src.py"), "# 中文注释\nprint('ok')\n").unwrap();
+            let rewrite = shell_call(
+                dir.path(),
+                "(Get-Content src.py -Raw) -replace 'ok','fine' | Set-Content src.py -NoNewline; Get-Content src.py",
+            )
+            .await;
+            assert_eq!(rewrite["exit_code"], json!(0), "{rewrite}");
+            let rewritten = decode_text(std::fs::read(dir.path().join("src.py")).unwrap()).unwrap();
+            assert_eq!(rewritten, "# 中文注释\nprint('fine')\n");
+            assert!(
+                rewrite["stdout"].as_str().unwrap().contains("中文注释"),
+                "{rewrite}"
+            );
+            assert!(shell_description().contains("PowerShell"));
+        }
+    }
+
     #[tokio::test]
     async fn list_files_lists_sorted_skips_and_respects_limits() {
         let dir = tempfile::tempdir().unwrap();
@@ -2409,6 +2533,43 @@ mod tests {
             .await
             .unwrap_err();
         assert!(bad_session.to_string().contains("session id"));
+    }
+
+    #[test]
+    fn decode_text_handles_boms_and_utf16() {
+        assert_eq!(decode_text(b"\xEF\xBB\xBFhi".to_vec()).unwrap(), "hi");
+        let le: Vec<u8> = [0xFF, 0xFE]
+            .into_iter()
+            .chain("中a".encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
+        assert_eq!(decode_text(le).unwrap(), "中a");
+        let be: Vec<u8> = [0xFE, 0xFF]
+            .into_iter()
+            .chain("ok".encode_utf16().flat_map(u16::to_be_bytes))
+            .collect();
+        assert_eq!(decode_text(be).unwrap(), "ok");
+        assert!(decode_text(vec![0xC3, 0x28]).is_err());
+    }
+
+    #[test]
+    fn within_workspace_allows_nested_new_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        std::fs::create_dir_all(&root).unwrap();
+        // 多级尚不存在的目录：允许（调用方负责创建），且仍限制在 workspace 内。
+        let nested = within_workspace(&root, "pkg/sub/deep/file.py").unwrap();
+        assert!(nested.ends_with("pkg/sub/deep/file.py"));
+        assert!(within_workspace(&root, "pkg/../../escape.txt").is_err());
+        assert_eq!(
+            workspace_relative(
+                &root,
+                &std::fs::canonicalize(&root)
+                    .unwrap()
+                    .join("a")
+                    .join("b.txt")
+            ),
+            "a/b.txt"
+        );
     }
 
     #[tokio::test]
