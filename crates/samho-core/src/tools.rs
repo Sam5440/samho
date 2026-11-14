@@ -433,11 +433,13 @@ fn within_workspace(workspace: &Path, requested: &str) -> Result<PathBuf> {
 /// 重定向与 Out-File 默认产物）也按文本读取，其余非 UTF-8 内容报错。
 fn decode_text(bytes: Vec<u8>) -> Result<String> {
     let utf16 = |big_endian: bool| {
-        let units = bytes[2..].chunks_exact(2).map(|pair| {
+        // as_chunks 成对读取并忽略末尾奇数字节，语义与 chunks_exact 一致。
+        let (pairs, _) = bytes[2..].as_chunks::<2>();
+        let units = pairs.iter().map(|pair| {
             if big_endian {
-                u16::from_be_bytes([pair[0], pair[1]])
+                u16::from_be_bytes(*pair)
             } else {
-                u16::from_le_bytes([pair[0], pair[1]])
+                u16::from_le_bytes(*pair)
             }
         });
         char::decode_utf16(units)

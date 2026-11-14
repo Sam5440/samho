@@ -1101,8 +1101,10 @@ mod tests {
         assert!(confined(&root, "dang.txt", false).await.is_err());
         // 哨兵未被改写。
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "sentinel");
-        // 普通新路径不受影响。
+        // 普通新路径不受影响。confined 返回规范化路径（macOS 的临时目录
+        // 经 /var 符号链接），前缀比较也要用规范化后的 root。
         let fresh = confined(&root, "fresh/new.txt", false).await.unwrap();
-        assert!(fresh.starts_with(std::path::Path::new(&root)));
+        let root_canonical = std::fs::canonicalize(&root).unwrap();
+        assert!(fresh.starts_with(&root_canonical));
     }
 }
