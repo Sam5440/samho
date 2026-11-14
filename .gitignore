@@ -15,16 +15,13 @@
 !/reports/charts/
 !/reports/docgen/
 !/reports/out/
-!/reports/demo-data/
+# reports/demo-data/ 是演示服务运行时的输出目录（会话检查点、事件轨迹、预算采样，随运行持续追加增长），
+# 属于本机运行数据而非源码，整体不入库；需要时用 reports/demo-config.toml 起服务在本地重新生成。
 # 白名单内仍排除的中间物与大体积产物（本机工具/依赖/渲染中间页）
 /reports/docgen/node_modules/
 /reports/out/pages/
 /reports/out/pdf/
 /reports/shots/full/
-/reports/demo-data/*
-!/reports/demo-data/events.jsonl
-!/reports/demo-data/sessions.jsonl
-!/reports/demo-data/budget.jsonl
 __pycache__/
 *.pyc
 *.log
