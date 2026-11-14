@@ -203,6 +203,89 @@ fn apply_prompt(app: &mut App, ctx: &Ctx, action: PromptAction, text: String) {
             );
             app.status = "已请求重命名项目".into();
         }
+        PromptAction::NewFile(dir) => {
+            let path = join_relative(&dir, &value);
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::FsMut,
+                "PUT",
+                "/api/file",
+                Some(json!({"path": path, "content": ""})),
+            );
+            app.status = format!("已请求创建文件 {path}");
+        }
+        PromptAction::NewDir(dir) => {
+            let path = join_relative(&dir, &value);
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::FsMut,
+                "POST",
+                "/api/fs/mkdir",
+                Some(json!({"path": path})),
+            );
+            app.status = format!("已请求创建目录 {path}");
+        }
+        PromptAction::RenamePath(from) => {
+            // 目标 = 原目录 + 新名（同名目录内改名）
+            let parent = from
+                .rsplit_once('/')
+                .map_or(String::new(), |(head, _)| head.to_owned());
+            let to = join_relative(&parent, &value);
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::FsMut,
+                "POST",
+                "/api/fs/rename",
+                Some(json!({"from": from, "to": to})),
+            );
+            app.status = format!("已请求重命名 {from} → {to}");
+        }
+        PromptAction::GitCommit => {
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::GitMut,
+                "POST",
+                "/api/git/commit",
+                Some(json!({"message": value})),
+            );
+            app.status = "已请求提交".into();
+        }
+        PromptAction::NewBranch => {
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::GitMut,
+                "POST",
+                "/api/git/checkout",
+                Some(json!({"branch": value, "create": true})),
+            );
+            app.status = format!("已请求新建并切换分支 {value}");
+        }
+        PromptAction::BrowserUrl => {
+            let url = value;
+            if let Some(browser) = app.browser.as_mut() {
+                browser.url = url.clone();
+            } else {
+                app.browser = Some(super::browser::BrowserPanel {
+                    url: url.clone(),
+                    lines: Vec::new(),
+                    scroll: 0,
+                });
+            }
+            super::browser::open_external(app, &url);
+        }
+    }
+}
+
+/// 相对路径拼接（空段忽略；与文件面板约定一致）。
+fn join_relative(base: &str, name: &str) -> String {
+    let name = name.trim().trim_matches('/');
+    if name.is_empty() || name == "." {
+        return base.to_owned();
+    }
+    if base.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{base}/{name}")
     }
 }
 
@@ -356,6 +439,36 @@ fn perform(app: &mut App, ctx: &Ctx, action: Action) {
                 .and_then(|m| m["id"].as_str())
                 .unwrap_or("自动（按层级路由）");
             app.status = format!("已选择模型 {label}");
+        }
+        Action::DeleteFile(path) => {
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::FsMut,
+                "DELETE",
+                &format!("/api/fs?path={}", super::super::urlencode_query(&path)),
+                None,
+            );
+            app.status = format!("已请求删除 {path}");
+        }
+        Action::GitDiscard(paths) => {
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::GitMut,
+                "POST",
+                "/api/git/discard",
+                Some(json!({"paths": paths})),
+            );
+            app.status = "已请求丢弃修改".into();
+        }
+        Action::GitCheckout(branch) => {
+            super::super::spawn_panel(
+                ctx,
+                super::super::PanelKind::GitMut,
+                "POST",
+                "/api/git/checkout",
+                Some(json!({"branch": branch, "create": false})),
+            );
+            app.status = format!("已请求切换分支 {branch}");
         }
     }
 }

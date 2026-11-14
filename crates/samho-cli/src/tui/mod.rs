@@ -47,12 +47,16 @@ const ACCENT: Color = Color::Rgb(188, 229, 87);
 const MUTED: Color = Color::Rgb(128, 142, 151);
 const BACKGROUND: Color = Color::Rgb(14, 20, 24);
 
-/// 顶层视图（M4 起扩展文件/Git/终端/浏览器）。
+/// 顶层视图（M4：文件/Git/终端/浏览器设备面板）。
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum View {
     #[default]
     Main,
     Tasks,
+    Files,
+    Git,
+    Term,
+    Browser,
 }
 
 /// 主视图三栏焦点：Shift+Tab 循环切换，输入/侧栏/检查面板各占一套键位。
@@ -121,6 +125,10 @@ enum Action {
     PickModel(usize),
     /// 模型角色改派（tier → model；空串 = 跟随自动路由）
     AssignRole(String, String),
+    // M4：文件/Git
+    DeleteFile(String),
+    GitDiscard(Vec<String>),
+    GitCheckout(String),
 }
 
 /// 输入浮层的提交动作。
@@ -129,6 +137,13 @@ enum PromptAction {
     NewProject,
     RenameSession(String),
     RenameProject(String),
+    // M4：文件/Git/浏览器
+    NewFile(String),
+    NewDir(String),
+    RenamePath(String),
+    GitCommit,
+    NewBranch,
+    BrowserUrl,
 }
 
 /// 模态浮层（打开时独占键位）。
@@ -212,6 +227,17 @@ struct App {
     inspector_filter: String,
     inspector_search: bool,
     last_trace_id: String,
+    // M4：设备面板（文件/Git/终端/浏览器）
+    /// serve 根地址（系统浏览器外开 raw/预览链接用）
+    base_url: String,
+    files: views::files::FilesPanel,
+    git: views::git::GitPanel,
+    /// 本 TUI 已知的终端会话（新建 + 会话附属列表合并）
+    term_ids: Vec<String>,
+    term_cursor: usize,
+    /// 非 None 时事件循环下一拍进入接管模式（挂起 TUI 透传 PTY）
+    takeover: Option<String>,
+    browser: Option<views::browser::BrowserPanel>,
 }
 
 /// 资源轮询快照（字段较多，装箱避免 Update 枚举尺寸失衡）。
@@ -246,6 +272,38 @@ enum Update {
         value: Value,
         version: u64,
     },
+    /// M4 设备面板的一次性请求回包（文件列表/读取、git、终端、浏览器文本）
+    Panel {
+        kind: PanelKind,
+        value: Value,
+    },
+}
+
+/// 设备面板请求类别（决定 `apply_update` 的落点与后续动作）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PanelKind {
+    /// /api/fs 目录列表
+    Files,
+    /// /api/file 文本读取（含 binary 标记）
+    FileContent,
+    /// PUT /api/file 保存成功 → 状态栏提示
+    FileSaved,
+    /// mkdir/rename/delete/new 等文件操作成功 → 自动刷新列表
+    FsMut,
+    GitStatus,
+    GitDiff,
+    GitLog,
+    GitBranches,
+    /// stage/unstage/commit/checkout/discard 成功 → 自动刷新 status
+    GitMut,
+    /// 会话附属终端列表
+    TermList,
+    /// 新建终端成功 → 记录 id 并触发接管
+    TermNew,
+    /// 终端关闭
+    TermClosed,
+    /// /api/proxy 文本模式回包 {url, text}
+    BrowserText,
 }
 
 /// 键位处理所需的请求上下文（client/url/回程通道），由事件循环临时借用。
@@ -450,6 +508,93 @@ fn cancel_task(ctx: &Ctx, task_id: &str) {
         Some(json!({})),
         None,
     );
+}
+
+/// 设备面板请求：任意方法，回包走 `Update::Panel`（错误走 `Update::Error`）。
+fn spawn_panel(ctx: &Ctx, kind: PanelKind, method: &str, path: &str, body: Option<Value>) {
+    let client = ctx.client.clone();
+    let url = ctx.url.to_owned();
+    let sender = ctx.sender.clone();
+    let method = method.to_ascii_uppercase();
+    let path = path.to_owned();
+    tokio::spawn(async move {
+        let result = async {
+            let base = format!("{url}{path}");
+            let request = match method.as_str() {
+                "GET" => client.get(&base),
+                "PUT" => client.put(&base),
+                "PATCH" => client.patch(&base),
+                "DELETE" => client.delete(&base),
+                _ => client.post(&base),
+            };
+            let request = if let Some(body) = &body {
+                request.json(body)
+            } else {
+                request
+            };
+            let response = request.send().await?;
+            let status = response.status();
+            let value: Value = response.json().await.unwrap_or(Value::Null);
+            anyhow::ensure!(
+                status.is_success(),
+                "{}",
+                value["error"].as_str().unwrap_or("面板请求失败")
+            );
+            Ok::<Value, anyhow::Error>(value)
+        }
+        .await;
+        let update = match result {
+            Ok(value) => Update::Panel { kind, value },
+            Err(error) => Update::Error(error.to_string()),
+        };
+        let _ = sender.send(update).await;
+    });
+}
+
+/// 浏览器文本模式：/api/proxy 返回的是净化 HTML（非 JSON），剥标签后回包。
+fn spawn_browser_text(ctx: &Ctx, target: &str) {
+    let client = ctx.client.clone();
+    let url = ctx.url.to_owned();
+    let sender = ctx.sender.clone();
+    let target = target.to_owned();
+    tokio::spawn(async move {
+        let result = async {
+            let response = client
+                .get(format!("{url}/api/proxy?url={}", urlencode_query(&target)))
+                .send()
+                .await?;
+            anyhow::ensure!(
+                response.status().is_success(),
+                "代理请求失败 {}",
+                response.status()
+            );
+            let html = response.text().await?;
+            Ok::<String, anyhow::Error>(html)
+        }
+        .await;
+        let update = match result {
+            Ok(html) => Update::Panel {
+                kind: PanelKind::BrowserText,
+                value: json!({"url": target, "text": views::browser::html_to_text(&html)}),
+            },
+            Err(error) => Update::Error(error.to_string()),
+        };
+        let _ = sender.send(update).await;
+    });
+}
+
+/// 仅转义查询串安全字符（浏览器面板/文件路径共用）。
+fn urlencode_query(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// 打开一个会话：拉取转录并切回主视图；清空进度/工具卡等运行态。
@@ -686,6 +831,7 @@ pub async fn run(url: &str) -> Result<()> {
     let mut app = App {
         status: format!("已连接 {url}"),
         complexity: 4,
+        base_url: root_url.clone(),
         ..App::default()
     };
     let mut streams = spawn_streams(&client, &url, &sender);
@@ -736,6 +882,42 @@ pub async fn run(url: &str) -> Result<()> {
                         app.view = View::Tasks;
                         continue;
                     }
+                    KeyCode::Char('3') if alt && !ctrl => {
+                        app.view = View::Files;
+                        let ctx = Ctx {
+                            client: &client,
+                            url: &url,
+                            sender: &sender,
+                        };
+                        let root = app.files.root.clone();
+                        let cwd = app.files.cwd.clone();
+                        views::files::refresh(&ctx, &root, &cwd);
+                        continue;
+                    }
+                    KeyCode::Char('4') if alt && !ctrl => {
+                        app.view = View::Git;
+                        let ctx = Ctx {
+                            client: &client,
+                            url: &url,
+                            sender: &sender,
+                        };
+                        spawn_panel(&ctx, PanelKind::GitStatus, "GET", "/api/git/status", None);
+                        continue;
+                    }
+                    KeyCode::Char('5') if alt && !ctrl => {
+                        app.view = View::Term;
+                        let ctx = Ctx {
+                            client: &client,
+                            url: &url,
+                            sender: &sender,
+                        };
+                        views::term::refresh(&ctx, app.active.as_deref());
+                        continue;
+                    }
+                    KeyCode::Char('6') if alt && !ctrl => {
+                        app.view = View::Browser;
+                        continue;
+                    }
                     KeyCode::F(7) if !app.submitting && app.active.is_none() => {
                         let choices = app
                             .workspaces
@@ -762,6 +944,7 @@ pub async fn run(url: &str) -> Result<()> {
                             app = App {
                                 status: format!("切换至 {url}"),
                                 complexity: 4,
+                                base_url: root_url.clone(),
                                 ..Default::default()
                             };
                             streams = spawn_streams(&client, &url, &sender);
@@ -792,7 +975,21 @@ pub async fn run(url: &str) -> Result<()> {
                 match app.view {
                     View::Main => handle_main_key(&mut app, &ctx, key),
                     View::Tasks => views::tasks::handle_key(&mut app, &ctx, key),
+                    View::Files => views::files::handle_key(&mut app, &ctx, key),
+                    View::Git => views::git::handle_key(&mut app, &ctx, key),
+                    View::Term => views::term::handle_key(&mut app, &ctx, key),
+                    View::Browser => views::browser::handle_key(&mut app, &ctx, key),
                 }
+            }
+            // 终端接管：挂起 TUI 界面，透传 PTY 直至 Ctrl+Q 脱离或流结束
+            if let Some(term_id) = app.takeover.take() {
+                let result = views::term::takeover(&client, &url, &term_id).await;
+                app.status = match result {
+                    Ok(()) => "已脱离终端（PTY 保活，Enter 重入）".to_owned(),
+                    Err(error) => format!("终端接管结束：{error}"),
+                };
+                // 恢复备用屏后清屏重绘（接管期间输出已污染终端缓冲）
+                terminal.clear()?;
             }
         }
     }
@@ -1400,6 +1597,131 @@ fn apply_update(app: &mut App, update: Update, ctx: Option<&Ctx>) {
             app.scroll = 0;
             app.status = "已从共享服务恢复会话".into();
         }
+        Update::Panel { kind, value } => apply_panel(app, ctx, kind, &value),
+    }
+}
+
+/// 设备面板回包落点（M4）：按请求类别更新对应状态字段；变更类成功后
+/// 自动发起刷新（ctx 只在事件循环内非 None，测试传 None 跳过网络）。
+fn apply_panel(app: &mut App, ctx: Option<&Ctx>, kind: PanelKind, value: &Value) {
+    match kind {
+        PanelKind::Files => {
+            app.files.entries = array(value["entries"].clone());
+            app.files.truncated = value["truncated"].as_bool().unwrap_or(false);
+            let count = app.files.entries.len();
+            app.files.cursor = app.files.cursor.min(count.saturating_sub(1));
+            let path = value["path"].as_str().unwrap_or("");
+            app.files.cwd = if path == app.files.root {
+                String::new()
+            } else {
+                path.strip_prefix(&format!("{}/", app.files.root))
+                    .unwrap_or(path)
+                    .to_owned()
+            };
+            app.status = format!(
+                "已加载目录 {}",
+                if path.is_empty() {
+                    "workspace 根"
+                } else {
+                    path
+                }
+            );
+        }
+        PanelKind::FileContent => {
+            let path = value["path"].as_str().unwrap_or_default().to_owned();
+            if value["binary"].as_bool().unwrap_or(false) {
+                app.files.mode = views::files::FileMode::Binary { path };
+            } else {
+                let content = value["content"].as_str().unwrap_or_default().to_owned();
+                let truncated = value["truncated"].as_bool().unwrap_or(false);
+                app.files.mode = views::files::FileMode::Content {
+                    path,
+                    content: if truncated {
+                        format!("{content}\n…（文件过大已截断）")
+                    } else {
+                        content
+                    },
+                    markdown: false,
+                    scroll: 0,
+                };
+            }
+            app.status = "文件已打开".into();
+        }
+        PanelKind::FileSaved => {
+            let path = value["path"].as_str().unwrap_or_default();
+            app.status = format!("已保存 {path}");
+        }
+        PanelKind::FsMut => {
+            app.status = "文件操作完成".into();
+            if let Some(ctx) = ctx {
+                let root = app.files.root.clone();
+                let cwd = app.files.cwd.clone();
+                views::files::refresh(ctx, &root, &cwd);
+            }
+        }
+        PanelKind::GitStatus => {
+            app.git.status = value.clone();
+            app.git.cursor = app
+                .git
+                .cursor
+                .min(app.git.changes().len().saturating_sub(1));
+            app.status = format!("git 状态已更新（{} 项变更）", app.git.changes().len());
+        }
+        PanelKind::GitDiff => {
+            app.git.diff = value["diff"].as_str().unwrap_or_default().to_owned();
+            app.status = "diff 已加载".into();
+        }
+        PanelKind::GitLog => {
+            app.git.log = array(value["commits"].clone());
+            app.git.cursor = 0;
+            app.status = format!("提交历史 {} 条", app.git.log.len());
+        }
+        PanelKind::GitBranches => {
+            app.git.branches = array(value["branches"].clone());
+            app.git.cursor = 0;
+            app.status = format!("分支 {} 个", app.git.branches.len());
+        }
+        PanelKind::GitMut => {
+            let summary = value
+                .as_object()
+                .and_then(|object| {
+                    object.iter().find_map(|(key, val)| {
+                        val.as_u64().map(|count| format!("{key} {count} 项"))
+                    })
+                })
+                .unwrap_or_else(|| "git 操作完成".into());
+            app.status = summary;
+            if let Some(ctx) = ctx {
+                spawn_panel(ctx, PanelKind::GitStatus, "GET", "/api/git/status", None);
+            }
+        }
+        PanelKind::TermList => {
+            for term in array(value["terms"].clone()) {
+                if let Some(term_id) = term["id"].as_str()
+                    && !app.term_ids.iter().any(|known| known == term_id)
+                {
+                    app.term_ids.push(term_id.to_owned());
+                }
+            }
+            app.term_cursor = app.term_cursor.min(app.term_ids.len().saturating_sub(1));
+        }
+        PanelKind::TermNew => {
+            if let Some(term_id) = value["id"].as_str() {
+                app.term_ids.push(term_id.to_owned());
+                app.term_cursor = app.term_ids.len() - 1;
+                app.takeover = Some(term_id.to_owned());
+                app.status = format!(
+                    "终端 #{} 已创建，进入接管模式（Ctrl+Q 脱离）",
+                    app.term_ids.len()
+                );
+            }
+        }
+        PanelKind::TermClosed => {
+            app.status = "终端已关闭".into();
+        }
+        PanelKind::BrowserText => {
+            views::browser::apply_text(app, value);
+        }
     }
 }
 
@@ -1433,6 +1755,10 @@ fn render(frame: &mut Frame, app: &App) {
     let view_label = match app.view {
         View::Main => "对话",
         View::Tasks => "任务",
+        View::Files => "文件",
+        View::Git => "Git",
+        View::Term => "终端",
+        View::Browser => "浏览器",
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -1460,6 +1786,10 @@ fn render(frame: &mut Frame, app: &App) {
     match app.view {
         View::Main => views::main::render(frame, app, rows[1], rows[2]),
         View::Tasks => views::tasks::render(frame, app, rows[1], rows[2]),
+        View::Files => views::files::render(frame, app, rows[1]),
+        View::Git => views::git::render(frame, app, rows[1]),
+        View::Term => views::term::render(frame, app, rows[1]),
+        View::Browser => views::browser::render(frame, app, rows[1]),
     }
     frame.render_widget(
         Paragraph::new(app.status.as_str()).style(Style::default().fg(accent)),
@@ -1473,13 +1803,17 @@ fn render(frame: &mut Frame, app: &App) {
     };
     let hints = match app.view {
         View::Main => format!(
-            "Ctrl+Q 退出  Shift+Tab 侧栏/输入  Alt+1 对话 Alt+2 任务  Tab 检查  F2 层级 Ctrl+M 模型 F6 技能  Ctrl+R 思考  Ctrl+F 引导  {} 提交  {} 新建",
+            "Ctrl+Q 退出  Shift+Tab 侧栏/输入  Alt+1 对话 Alt+2 任务 Alt+3 文件 Alt+4 Git Alt+5 终端 Alt+6 浏览器  Tab 检查  F2 层级 Ctrl+M 模型 F6 技能  {} 提交  {} 新建",
             binding(app, "submit_key", "Ctrl+Enter"),
             binding(app, "new_session_key", "Alt+N")
         ),
         View::Tasks => {
             "Ctrl+Q 退出  ↑↓ 选择  Enter 打开会话  s 停止  Alt+1/Esc 返回对话".to_owned()
         }
+        View::Files => "Ctrl+Q 退出  Enter 打开  Backspace 上级  M Markdown  e 编辑  n/N 新建  r 改名  d 删除  s 设根  p 预览  o 外开".to_owned(),
+        View::Git => "Ctrl+Q 退出  ↑↓ 选择  Enter diff  s/S 暂存  u 取消  D 丢弃  c 提交  l 历史  b 分支".to_owned(),
+        View::Term => "Ctrl+Q 退出  Enter 接管终端  n 新建  K 关闭  r 刷新".to_owned(),
+        View::Browser => "Ctrl+Q 退出  o 外开  u 换址  t 文本模式  ↑↓ 滚动".to_owned(),
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
