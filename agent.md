@@ -138,7 +138,8 @@ D:\ddcode\rpi\
 │       └── src/
 │           ├── main.rs             # clap CLI：run/serve/tui/fork/inspect/config/replay
 │           ├── server.rs           # Axum 路由、静态资源、中间件、任务索引
-│           ├── tui.rs              # Ratatui 三栏客户端
+│           ├── tui/                # Ratatui 客户端（mod/api/sse/markdown/widgets + views/）
+│           ├── panels.rs           # 文件/Git/浏览器代理后端
 │           ├── panels.rs           # 文件/Git/浏览器代理后端
 │           ├── term.rs             # PTY 池 + SSE
 │           ├── hub.rs              # 动态工作区注册表与 /w/{id} 分发
@@ -1051,29 +1052,37 @@ SSE 细节：`/api/events/stream` 先按游标分页回补（每页 128），再
 - 每个工作区独立：data_dir、会话、事件、预算、项目、附件、终端、角色表。
 - 动态工作区上限 32；注册表损坏的条目启动时跳过并重写文件。
 
-### 8.5 TUI（`tui.rs`）
+### 8.5 TUI（`tui/` 模块树，对齐网页工作台）
 
-三栏：会话 22% / 轨迹 51% / 检查器 27%。纯 HTTP 客户端。
+纯 HTTP/SSE 客户端（不读取 `--config`），模块：`mod.rs`（App 状态/事件循环/键位）、`api.rs`（JSON + 两条 SSE）、`sse.rs`（解析器）、`markdown.rs`（pulldown-cmark → ratatui 完整 Markdown 渲染：标题/嵌套列表/GFM 表格/任务列表/代码围栏 syntect 高亮/引用/删除线/链接/图片降级）、`widgets.rs`（spinner/相对时间/截断/参数摘要等共享件）、`views/`（main/sidebar/tasks/inspector/files/git/term/browser/overlays）。
 
-- 渲染 tick 33 ms；资源轮询 800 ms（state/models/sessions/objects/skills/events page/ui/workspaces）；任务轮询 250 ms。
-- 连接检查：`GET /api/health`；失败提示“无法连接运行时，请先启动 samho serve”。
-- 事件缓冲最多 300 条；检查器四页：轨迹（最近 16 事件）、对象、技能、MCP。
+- 视图：**Alt+1** 对话（项目侧栏 + 流式 Markdown 转录 + 工具卡 + composer）、**Alt+2** 任务看板、**Alt+3** 文件、**Alt+4** Git、**Alt+5** 终端、**Alt+6** 浏览器；**Esc** 回主视图，**F7** 切工作区。
+- 渲染 tick 33 ms；资源轮询 800 ms（11 个端点，含 /api/projects、/api/tasks、/api/model-roles）；`/api/live/stream` 与 `/api/events/stream` 断线 1s→8s 退避重连，轮询兜底。
+- 主视图焦点三向循环（Shift+Tab）：composer ↔ 侧栏 ↔ 检查面板；侧栏支持 `/` 搜索、`m` 行菜单、`P` 新建项目、项目分组展开态持久化（PATCH open）。
+- 检查面板（Tab 循环 6 页）：轨迹（model/tool 调用卡，可展开、`/` 过滤、`E` 导出 trace 到 `reports/`）、预算、对象、技能（`R` 刷新）、MCP、模型（角色改派 `Enter`/`R` 恢复默认，PUT /api/model-roles）。
 
 键位：
 
 | 键 | 行为 |
 | --- | --- |
-| `Ctrl+Q` | 立即退出（不取消任务） |
+| `Ctrl+Q` | 立即退出（不取消任务）；终端接管态下=脱离 PTY |
 | `Ctrl+Enter`（默认提交键） | 提交；当提交键仍是默认值时，裸 `Enter` 也可提交 |
 | `Alt+N`（默认新会话键）/ `F5` | 新草稿（空闲时） |
 | `Ctrl+K`（默认取消键）/ `Ctrl+C` | 取消活动任务；空闲且未提交时退出 |
-| `F2` / `F3` | 循环层级 / 模型 |
-| `F4` / `F6` / `F7` | 循环会话 / 技能 / 工作区 |
-| `Tab` | 切换检查器面板 |
+| `Alt+1..6` | 对话 / 任务 / 文件 / Git / 终端 / 浏览器 |
+| `Shift+Tab` / `Tab` | 主视图焦点循环 / 检查面板循环 |
+| `Ctrl+M` / `F6` | 模型选择浮层 / 技能多选浮层 |
+| `Ctrl+R` / `Ctrl+F` | 折叠思考块 / 切换 follow-up 模式 |
+| `F2` / `F3` / `F4` / `F7` | 层级 / 模型 / 会话 / 工作区 |
 | `PageUp` / `PageDown` | 滚动 ±8 行 |
 | `Shift+Enter` | 换行 |
 
-斜杠命令：`/help`、`/steer <text>`、`/follow-up <text>`、`/fork [cutoff] [title...]`、`/theme dark|light|contrast`、`/bind submit|new|cancel <KeySpec>`。
+- 文件面板：Enter 打开（目录进入/文本查看/图片与 HTML 外开）、`M` Markdown 渲染切换、`e` 自建多行编辑器（`Ctrl+S` 保存 → PUT /api/file）、`n`/`N` 新建文件/目录、`r` 改名、`d` 删除（确认）、`s` 设树根、`p` HTML 沙箱预览（POST /api/preview → 系统浏览器）。
+- Git 面板：Enter 看选中路径 diff（红绿着色）、`s`/`S` 暂存、`u` 取消暂存、`D` 丢弃（确认）、`c` 提交（输入浮层）、`l` 历史、`b` 分支（Enter 切换、`n` 新建）。
+- 终端面板：`n` 新建（附属当前会话）、`Enter` **接管模式**——挂起 TUI、退出备用屏，`/api/term/{id}/stream` 字节流直通 stdout，键盘翻译 xterm 序列经 `/input` 写回，resize 联动；`Ctrl+Q` 脱离（PTY 保活，Enter 重入续接 backfill）、`K` 关闭。
+- 浏览器面板：`o`/`u` 输入 URL 系统浏览器打开、`t` 文本模式（`/api/proxy` 取净化 HTML 后剥标签、实体解码、滚动阅读）——iframe/图片/交互网页属设计内降级。
+
+斜杠命令：`/help`、`/steer <text>`、`/follow-up <text>`、`/fork [cutoff] [title...]`、`/theme dark|light|contrast`、`/bind submit|new|cancel <KeySpec>`、`/auto`（层级跟随自动路由）、`/complexity 0-10`。运行中裸 `Enter`/提交键 = steer（follow-up 模式时入队）。
 
 已知不一致：`/theme contrast` 被本地支持，但服务端 `validate_ui` 只接受 `dark|light|system` → 400。
 
@@ -1185,8 +1194,8 @@ $env:SAMHO_DEV_API = "http://127.0.0.1:375"; npm --prefix web/app run dev -- --p
 
 | 套件 | 数量 | 覆盖重点 |
 | --- | ---: | --- |
-| `samho-cli` 单元测试 | 46 | 路由/静态资源/会话/项目/附件/工作区/任务索引/TUI/PTY（Unix 另有 1 项符号链接测试） |
-| `samho-core` 内联单元 | 31 | Anthropic 7、tools 13、session 4、projects 3、context 2、budget 1、attachments 1 |
+| `samho-cli` 单元测试 | 89 | 路由/静态资源/会话/项目/附件/工作区/任务索引/TUI（SSE/Markdown/视图/键位）/PTY（Unix 另有 1 项符号链接测试） |
+| `samho-core` 内联单元 | 34 | Anthropic 7、tools 13、session 4、projects 3、context 2、budget 1、attachments 1 |
 | `tests/agent_integration.rs` | 6 | 真实本地 HTTP Chat Completions 工具循环、失败/取消/截断参数、策略拒绝、恢复、数据目录锁、并发隔离 |
 | `tests/core_contracts.rs` | 15 | Object 生命周期、路由约束、配置往返/校验、Skill、事件并发/恢复/轮转、脱敏、广播 |
 | `tests/facet_integration.rs` | 6 | 握手/认证/白名单/traceparent/取消/断连/响应上限/Python fixture |
@@ -1339,8 +1348,8 @@ cargo build -p samho        # 重新嵌入二进制
 
 | 位置 | 问题 | 影响 |
 | --- | --- | --- |
-| `server.rs` + `tui.rs` | `PUT /api/ui` 写 `data_dir/ui.json`，启动时不回读 | 服务重启后主题/快捷键回到配置文件或默认值 |
-| `tui.rs` | `/theme contrast` 被服务端拒绝 | 该命令返回 400 |
+| `server.rs` + `tui/mod.rs` | `PUT /api/ui` 写 `data_dir/ui.json`，启动时不回读 | 服务重启后主题/快捷键回到配置文件或默认值 |
+| `tui/mod.rs` | `/theme contrast` 被服务端拒绝 | 该命令返回 400 |
 | `scripts/test-chinese-browser.mjs` | 断言 13 篇文档，实际 12 篇；工作台 UI 断言仍针对旧版 DOM | 浏览器验收脚本无法通过；不在 CI |
 | `panels.rs::git_diff` | 按固定字节偏移截断 UTF-8 | 截断点落在多字节字符中间时可能 panic |
 | `anthropic.rs` 流式 | 无总字节/单帧/工具数上限 | 恶意或异常流可能占用过多内存 |
