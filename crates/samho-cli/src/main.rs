@@ -1,5 +1,6 @@
 mod hub;
 mod panels;
+mod preview;
 mod roles;
 mod server;
 mod term;

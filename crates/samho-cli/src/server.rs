@@ -40,6 +40,8 @@ pub(crate) struct AppState {
     pub(crate) terms: std::sync::Arc<crate::term::TermHub>,
     /// 任务类型 → 模型覆盖表（与该运行时的 RoleRouter 共享）。
     pub(crate) roles: Arc<crate::roles::ModelRoles>,
+    /// 沙箱预览的临时 HTML（对话代码块 → /api/preview/{id}），内存有界、重启即失效。
+    pub(crate) previews: Arc<crate::preview::PreviewStore>,
 }
 
 struct TaskEntry {
@@ -66,6 +68,7 @@ impl AppState {
             hub: None,
             terms,
             roles: crate::roles::ModelRoles::detached(),
+            previews: Arc::new(crate::preview::PreviewStore::default()),
         }
     }
 
@@ -533,7 +536,10 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
         .route("/api/git/commit", post(crate::panels::git_commit))
         .route("/api/git/checkout", post(crate::panels::git_checkout))
         .route("/api/git/discard", post(crate::panels::git_discard))
-        .route("/api/proxy", get(crate::panels::proxy));
+        .route("/api/proxy", get(crate::panels::proxy))
+        .route("/api/preview", post(crate::preview::preview_create))
+        .route("/api/preview/fs/{*path}", get(crate::preview::preview_file))
+        .route("/api/preview/{id}", get(crate::preview::preview_get));
     for (path, mime, body) in STATIC_ASSETS {
         let mime = *mime;
         let body = *body;
@@ -557,7 +563,18 @@ async fn local_origin(request: Request, next: Next) -> Response {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         let expected = format!("http://{host}");
-        if origin.to_str().ok() != Some(expected.as_str()) {
+        let referer = request
+            .headers()
+            .get(header::REFERER)
+            .and_then(|v| v.to_str().ok());
+        let sandbox_subresource = origin == "null"
+            && crate::preview::allows_null_origin(
+                request.method(),
+                request.uri().path(),
+                referer,
+                host,
+            );
+        if origin.to_str().ok() != Some(expected.as_str()) && !sandbox_subresource {
             return ApiError(
                 StatusCode::FORBIDDEN,
                 "cross-origin requests are not allowed".into(),
@@ -3618,5 +3635,161 @@ mod tests {
                 .is_none(),
             "动态工作区 SSE 必须随根关停结束"
         );
+    }
+
+    #[tokio::test]
+    async fn preview_routes_sandbox_html_and_confine_workspace_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("game")).unwrap();
+        std::fs::write(
+            dir.path().join("game/index.html"),
+            "<script src=\"main.js\"></script>",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("game/main.js"), "console.log(1)").unwrap();
+        let config = RuntimeConfig {
+            workspace: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            durable_logs: false,
+            ..RuntimeConfig::default()
+        };
+        let runtime = AgentRuntime::new(config).await.unwrap();
+        let app = router(runtime.clone());
+        let send = |request: Request<Body>| app.clone().oneshot(request);
+
+        // 暂存 → 读取：响应带 sandbox CSP，且不带 allow-same-origin。
+        let response = send(
+            Request::builder()
+                .method("POST")
+                .uri("/api/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"html":"<h1>hi</h1><script>1</script>"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+        let id = created["id"].as_str().unwrap().to_string();
+        let response = send(
+            Request::builder()
+                .uri(format!("/api/preview/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let csp = response.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(csp.starts_with("sandbox allow-scripts"));
+        assert!(!csp.contains("allow-same-origin"));
+        assert!(csp.contains("connect-src 'none'"));
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        assert_eq!(&body[..], b"<h1>hi</h1><script>1</script>");
+
+        // 空内容 400、未知 id 404。
+        let response = send(
+            Request::builder()
+                .method("POST")
+                .uri("/api/preview")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"html":"  "}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = send(
+            Request::builder()
+                .uri("/api/preview/missing")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // workspace 文件：MIME 正确、带沙箱 CSP；目录重定向到 index.html；越界拒绝。
+        let response = send(
+            Request::builder()
+                .uri("/api/preview/fs/game/main.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers()[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("text/javascript")
+        );
+        assert!(
+            response.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .starts_with("sandbox")
+        );
+        let response = send(
+            Request::builder()
+                .uri("/api/preview/fs/game")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(response.headers()[header::LOCATION], "game/index.html");
+        let response = send(
+            Request::builder()
+                .uri("/api/preview/fs/../secret.txt")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(response.status().is_client_error());
+
+        // 沙箱子资源（Origin: null）仅在 Referer 来自本服务时放行，其它路由仍拒绝。
+        let null_origin = |uri: &str, referer: &str| {
+            Request::builder()
+                .uri(uri)
+                .header(header::HOST, "127.0.0.1:7432")
+                .header(header::ORIGIN, "null")
+                .header(header::REFERER, referer)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let response = send(null_origin(
+            "/api/preview/fs/game/main.js",
+            "http://127.0.0.1:7432/api/preview/fs/game/index.html",
+        ))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "null"
+        );
+        let response = send(null_origin(
+            "/api/preview/fs/game/main.js",
+            "https://evil.example/",
+        ))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let response = send(null_origin(
+            "/api/state",
+            "http://127.0.0.1:7432/api/preview/fs/game/index.html",
+        ))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        runtime.shutdown().await.unwrap();
     }
 }
