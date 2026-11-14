@@ -1,4 +1,4 @@
-import { BookOpenIcon, ClipboardListIcon, MenuIcon, MonitorIcon, MoonIcon, PanelRightIcon, Settings2Icon, SunIcon, WifiIcon } from 'lucide-react';
+import { MenuIcon, MonitorIcon, MoonIcon, PanelRightIcon, Settings2Icon, SunIcon, WifiIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tip } from '@/components/ui/tooltip';
@@ -53,15 +53,6 @@ export function Topbar() {
       </div>
 
       <div className="flex-1" />
-
-      <nav aria-label="项目资料" className="hidden items-center gap-0.5 md:flex">
-        <Button asChild variant="ghost" size="xs" className="text-muted-foreground">
-          <a href="/docs"><BookOpenIcon />中文文档</a>
-        </Button>
-        <Button asChild variant="ghost" size="xs" className="text-muted-foreground">
-          <a href="/plan"><ClipboardListIcon />确认计划</a>
-        </Button>
-      </nav>
 
       {lanUrls.length > 0 && (
         <Tip text={<span className="whitespace-pre-line">{`局域网访问地址（点击复制）\n${lanUrls.join('\n')}`}</span>}>

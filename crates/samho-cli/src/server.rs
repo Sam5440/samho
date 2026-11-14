@@ -246,67 +246,6 @@ pub(crate) fn router_with_state(app: AppState) -> Router {
             get(|| async { Html(include_str!("../../../web/dist/index.html")) }),
         )
         .route(
-            "/docs",
-            get(|| async { Html(include_str!("../../../web/docs.html")) }),
-        )
-        .route(
-            "/docs.html",
-            get(|| async { Html(include_str!("../../../web/docs.html")) }),
-        )
-        .route(
-            "/docs.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../../../web/docs.css"),
-                )
-            }),
-        )
-        .route(
-            "/docs.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../../../web/docs.js"),
-                )
-            }),
-        )
-        .route(
-            "/documents-data.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../../../web/documents-data.js"),
-                )
-            }),
-        )
-        .route(
-            "/plan",
-            get(|| async { Html(include_str!("../../../web/plan.html")) }),
-        )
-        .route(
-            "/plan.html",
-            get(|| async { Html(include_str!("../../../web/plan.html")) }),
-        )
-        .route(
-            "/plan.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../../../web/plan.css"),
-                )
-            }),
-        )
-        .route(
-            "/plan.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../../../web/plan.js"),
-                )
-            }),
-        )
-        .route(
             "/api/health",
             get(|| async { Json(json!({"status":"ok","api_version":1})) }),
         )

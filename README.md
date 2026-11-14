@@ -58,7 +58,7 @@ Runtime 已将 Session/Task 纳入 Object 生命周期，并提供 scope、middl
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
+node --test scripts/test-workbench-contracts.mjs
 node scripts/check-web-esm.mjs
 
 # 修改 web/app 后重新构建并提交 web/dist，再重新编译 Rust
@@ -80,15 +80,10 @@ python scripts/smoke_runtime.py --force
 
 当前实现状态和性能边界见 [docs/implementation-status.md](docs/implementation-status.md)。release 本地基准脚本为 `scripts/benchmark-runtime.ps1`；不据此宣称相对 Pi 的速度倍率。
 
-## 中文文档与确认计划
+## 中文文档
 
 - [中文使用说明](docs/中文使用说明.md)：中文启动、网页/TUI 操作、任务执行、复盘和配置入口。
-- [中文确认计划说明](docs/中文确认计划说明.md)：网页 `/plan` 的勾选、导出、回传和执行规则。
 - [当前架构](docs/architecture.md)、[自定义配置](docs/customization.md)、[实现状态](docs/implementation-status.md)。
-
-打开本地服务后访问 `/docs` 阅读中文文档，访问 `/plan` 勾选下一阶段目标并下载 `samho-确认执行计划-YYYY-MM-DD.txt`。网页只生成计划文本，不自动执行；将完整文本回传本对话后，才按确认范围开展实现。
-
-也可直接打开本地 [中文文档中心](web/docs.html) 与 [确认计划网页](web/plan.html)，无需先启动 Rust 服务。真正运行 Agent 任务仍需启动服务。
 
 ## 上游与分析
 

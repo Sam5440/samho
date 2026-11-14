@@ -83,11 +83,7 @@ body.push(...H.figure(S("35-mcp-panel.png"), "MCP 面板：服务器连接状态
 body.push(H.h2("5.3 界面设置与主题"));
 body.push(...H.figure(S("41-settings-dialog.png"), "界面与快捷键设置：主题、发送任务（Ctrl+Enter）、新建会话（Alt+N）、取消任务（Ctrl+K）"));
 body.push(...H.figure(S("42-light-theme.png"), "一键切换亮色主题，全部组件同步换肤"));
-body.push(H.h2("5.4 文档中心与确认计划"));
-body.push(H.p("顶栏两个入口直达 /docs 中文文档中心（12 份文档，支持全文搜索）与 /plan 确认计划页。确认计划页只负责勾选、生成 UTF-8 文本文件，不自动执行任何任务；把生成的计划文本回传给 Agent 才会按确认范围开展实现，形成「先审阅、再确认、后执行」的闭环。"));
-body.push(...H.figure(S("45-docs-center.png"), "中文文档中心：左侧分类导航与搜索，右侧文档渲染"));
-body.push(...H.figure(S("46-plan-page.png"), "确认计划页：项目目标与执行边界表单，右侧为当前基线说明"));
-body.push(H.h2("5.5 沙箱预览"));
+body.push(H.h2("5.4 沙箱预览"));
 body.push(H.p("对话中出现的 HTML 代码块与 workspace 内的网页可以在隔离沙箱中直接运行预览。预览页面运行在独立的受限源（CSP sandbox、Origin 为 null），与服务源隔离，无法携带用户凭据；文件面板与预览均拒绝符号链接与越界路径。下图为演示中 Agent 按任务生成的 examples/hello-samho.html 实际渲染效果。"));
 body.push(...H.figure(S("24-preview-hello-samho.png"), "Agent 生成的 hello-samho.html 在浏览器中的真实渲染效果"));
 
@@ -120,9 +116,9 @@ body.push(H.p("等价的完整配置示例见 examples/samho.deepseek.toml：模
 body.push(H.h2("6.4 验证与复盘"));
 body.push(...H.codeBlock([
   "cargo fmt --all -- --check",
-  "cargo test --workspace          # 162 项 Rust 测试",
+  "cargo test --workspace          # 201 项 Rust 测试",
   "cargo clippy --workspace --all-targets -- -D warnings",
-  "node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs",
+  "node --test scripts/test-workbench-contracts.mjs",
   "",
   "powershell -NoProfile -File scripts/smoke-web.ps1 -Force",
   "python scripts/smoke_runtime.py --force",
@@ -155,12 +151,11 @@ body.push(...H.tbl({
   small: true,
 }));
 body.push(...H.tbl({
-  caption: "中文文档索引（/docs 文档中心收录 12 份）",
+  caption: "中文文档索引",
   headers: ["文档", "内容"],
   widths: [40, 60],
   rows: [
     ["中文使用说明", "启动、网页/TUI 操作、任务执行、复盘与配置入口"],
-    ["中文确认计划说明", "/plan 的勾选、导出、回传与执行规则"],
     ["当前架构 architecture.md", "分层设计、Object 契约、数据流"],
     ["自定义配置 customization.md", "runtime.toml 全字段与扩展方式"],
     ["实现状态 implementation-status.md", "当前能力边界与后续阶段"],

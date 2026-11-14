@@ -1,4 +1,4 @@
-name: 跨平台 Rust 与中文网页验证
+name: 跨平台 Rust 与网页工作台验证
 on:
   push:
   pull_request:
@@ -40,9 +40,9 @@ jobs:
         run: cargo test --workspace --locked
       - name: Rust 静态检查
         run: cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
-      - name: 中文网页与确认计划契约
+      - name: 网页工作台契约
         run: |
-          node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
+          node --test scripts/test-workbench-contracts.mjs
           node scripts/check-web-esm.mjs
       - name: 锁定依赖发布构建
         run: cargo build --release --locked -p samho

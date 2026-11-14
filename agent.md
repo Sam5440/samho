@@ -48,7 +48,7 @@ cargo run -p samho -- run "/demo read README.md" --complexity 2 --json
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
-node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
+node --test scripts/test-workbench-contracts.mjs
 node scripts/check-web-esm.mjs
 
 # 改了 web/app（React 前端）后：先构建再编译 Rust（产物 web/dist 被 include_str! 内嵌并提交）
@@ -77,7 +77,7 @@ Samho 是 **Pi coding agent（TypeScript）的 Rust 增量重写**：保留 Agen
 - 单调序号 trace、span 树、脱敏、分页、SSE 与 Markdown 复盘导出。
 - 项目制工作区：项目 / 文件夹 / 会话树，会话可挂终端与浏览器标签。
 - 静态多工作区与运行时动态工作区，各自独立 data_dir、会话、预算与终端。
-- 中文 Web 工作台、TUI、离线文档中心与确认计划页。
+- 中文 Web 工作台与 TUI。
 
 **明确不是**：
 
@@ -150,10 +150,8 @@ D:\ddcode\rpi\
 │   │   ├── src/components/         # 顶栏/侧栏/对话/输入区/检查器/面板
 │   │   └── src/lib/                # api、store（zustand）、controller、projection、markdown
 │   ├── dist/                       # Vite 构建产物（固定文件名，提交进仓库）
-│   ├── vendor/xterm*.{js,css}      # 终端惰性加载
-│   ├── docs.html + docs.css + docs.js + documents-data.js
-│   └── plan.html + plan.css + plan.js
-├── docs/                           # 16 份 Markdown + upstream-lock.json
+│   └── vendor/xterm*.{js,css}      # 终端惰性加载
+├── docs/                           # 14 份 Markdown + upstream-lock.json
 ├── examples/
 │   ├── samho.chat.toml             # OpenAI 兼容 Provider 模板
 │   └── samho.anthropic.toml        # Anthropic Messages 网关完整示例
@@ -183,7 +181,6 @@ D:\ddcode\rpi\
 
 ### 3.2 生成物与内嵌物
 
-- `web/documents-data.js` 由 `scripts/build-chinese-docs.py` 从 `docs/*.md` 与 `README.md` 生成，**提交进仓库**；改文档后必须重跑。
 - 工作台由 `web/app` 构建到 `web/dist`（`index.html` + `assets/app.js` + `assets/app.css`，单文件、无代码分割、无哈希），**提交进仓库**；CI 重新构建并 `git diff --exit-code -- web/dist` 校验同步。`.gitattributes` 固定 `web/dist` 为 LF。
 - 所有 Web 资源通过 `include_str!` 编译进二进制；**改前端必须先 `npm --prefix web/app run build`，再 `cargo build` 才生效**。
 - `STATIC_ASSETS` 共 6 项：`index.html`、`assets/app.js`、`assets/app.css` 与 3 个 xterm vendor 文件。Vite 配置固定产物文件名，新增前端代码不需要改该表。
@@ -264,9 +261,8 @@ cargo check --workspace --locked
 cargo test --workspace --locked          # Windows 基线 162 项（Unix 多 1 项符号链接测试）
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
 npm --prefix web/app run build           # tsc --noEmit + vite build → web/dist（改前端后必须）
-node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs   # 25 项
+node --test scripts/test-workbench-contracts.mjs   # 12 项
 node scripts/check-web-esm.mjs           # 构建产物语法与单文件约束
-python scripts/build-chinese-docs.py     # 仅改文档后需要，且必须提交生成物
 cargo build --release --locked -p samho
 python scripts/smoke_runtime.py --binary target/release/samho
 ```
@@ -316,7 +312,7 @@ python scripts/smoke_runtime.py --binary target/release/samho
 | --- | --- | --- |
 | 核心运行时 | `samho-core` | 配置、Agent 循环、路由、Provider、工具、会话、事件、预算、Object、Skill、MCP、Facet、项目、附件 |
 | 适配层 | `samho-cli` | CLI、Axum HTTP/SSE、静态资源、TUI、文件/Git/终端/浏览器面板、动态工作区、角色路由 |
-| 前端 | `web/` | 原生 ES Module 工作台、离线文档中心、离线确认计划页 |
+| 前端 | `web/` | React + Vite 工作台（`web/app` → `web/dist` 内嵌） |
 
 `samho-core` 不依赖 axum/ratatui；`samho-cli` 只做装配与 I/O。
 
@@ -937,10 +933,6 @@ LAN 发现：UDP connect 到 8.8.8.8 / 10.255.255.255 / 192.168.255.255 / 172.31
 | 路径 | 说明 |
 | --- | --- |
 | `GET /`、`GET /index.html` | 工作台 |
-| `GET /docs`、`GET /docs.html` | 文档中心 |
-| `GET /docs.css`、`GET /docs.js`、`GET /documents-data.js` | 文档中心资源 |
-| `GET /plan`、`GET /plan.html` | 确认计划页 |
-| `GET /plan.css`、`GET /plan.js` | 计划页资源 |
 | `GET /assets/app.js`、`GET /assets/app.css`、`GET /vendor/*` | `STATIC_ASSETS` 6 项 |
 | `ANY /w/{id}`、`ANY /w/{id}/{*rest}` | 动态工作区分发 |
 | 其他 | 404 纯文本；`/w/{id}/` → 308 到 `/w/{id}`（保留 query） |
@@ -1171,14 +1163,7 @@ $env:SAMHO_DEV_API = "http://127.0.0.1:375"; npm --prefix web/app run dev -- --p
 - 浏览器标签按会话持久化到 `attachments.json`（300 ms 防抖）；工作区级标签只在内存。
 - 终端按 `${workspacePrefix}::${sessionId}` 复用；附属会话重开时优先重连服务端活体 PTY（backfill 恢复历史）；输入 404 时自动重建。
 
-### 9.6 文档中心与计划页
-
-`/docs` 与 `/plan` 仍是独立的纯静态页（`web/docs.*`、`web/plan.*`），与工作台构建无关：
-
-- **`/docs`**：读 `window.SamhoDocuments`（12 篇）；hash 路由、搜索、按分类分组；下载 `标题.md`（UTF-8 BOM）；无 `innerHTML`、无网络请求，可 `file://` 打开；数据由 `scripts/build-chinese-docs.py` 生成并提交。
-- **`/plan`**：47 个范围项、7 组；生成 8 节确认文本并下载 `samho-确认执行计划-YYYY-MM-DD.txt`；纯离线、无持久化、无 API 请求。
-
-### 9.7 修改前端的硬性要求
+### 9.6 修改前端的硬性要求
 
 1. 改 `web/app` 后运行 `npm --prefix web/app run build` 并**提交 `web/dist`**；CI 会重新构建并比对。
 2. 不引入运行期注入样式或内联脚本的依赖；新增 Radix 组件前检查其是否用 `react-remove-scroll`/`<style>`（契约测试有黑名单）。
@@ -1214,16 +1199,13 @@ cargo test -p samho-core --test runtime_semantics
 cargo test -p samho --locked server::tests::health_pages_and_static_assets
 ```
 
-### 10.2 Node 契约测试（25 项）
+### 10.2 Node 契约测试（12 项）
 
 ```powershell
-node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
+node --test scripts/test-workbench-contracts.mjs
 ```
 
-- `test-chinese-pages.mjs`（13）：文档中心/计划页的静态契约、无 `innerHTML`、无 `/api/` 请求、12 篇文档与源文件逐字一致；工作台 HTML 外壳与中文入口。
 - `test-workbench-contracts.mjs`（12）：轨迹搜索安全、HTML 注入白名单（仅 `<Markdown>` 组件 + DOMPurify 禁用标签/属性清单）、沙箱预览不同源且禁网络、增量追加去重、工作区 generation、提交锁、移动抽屉、aria、项目树状态、CSP 依赖黑名单与产物无内联脚本/样式、产物被内嵌、后端路由存在性。
-
-`scripts/test-chinese-browser.mjs` 是 Chrome/CDP 端到端验收，**当前断言仍写死 13 篇文档**，与 12 篇数据不一致；它不在 CI 中运行（见 §13）。
 
 ### 10.3 CI（`.github/workflows/ci.yml`）
 
@@ -1239,13 +1221,10 @@ node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
 
 | 脚本 | 用途 | 默认输出 |
 | --- | --- | --- |
-| `scripts/build-chinese-docs.py` | 生成 `web/documents-data.js`（12 篇） | 覆盖生成物 |
-| `scripts/smoke_runtime.py` | 跨平台真实二进制冒烟：health/state/docs/plan/demo 任务/会话/事件分页/UI | `reports/ci-smoke.json` |
+| `scripts/smoke_runtime.py` | 跨平台真实二进制冒烟：health/模拟状态/任务/会话/事件分页/UI 配置 | `reports/ci-smoke.json` |
 | `scripts/smoke-web.ps1` | Windows Web GUI/会话续接/工具循环/重启恢复 | `reports/release-web-smoke.json` |
 | `scripts/benchmark-runtime.ps1` | 外部进程 Demo 基准（p50/p95/峰值内存） | `reports/benchmark-runtime.json` |
-| `scripts/test-chinese-pages.mjs` | 文档/计划静态契约 | stdout |
 | `scripts/test-workbench-contracts.mjs` | 工作台安全/状态/API 契约 | stdout |
-| `scripts/test-chinese-browser.mjs` | Chrome/CDP 端到端 | `reports/chinese-pages/` |
 | `scripts/check-web-esm.mjs` | 构建产物 `web/dist/assets/app.js` 语法与单文件（无顶层 import/export）检查 | stdout |
 
 所有生成报告的脚本默认拒绝覆盖，需 `--force` / `-Force`。
@@ -1305,17 +1284,7 @@ node --test scripts/test-chinese-pages.mjs scripts/test-workbench-contracts.mjs
 3. 补 file/SQLite 双后端等价测试、尾部恢复、损坏拒绝、fork 边界。
 4. 更新 `docs/storage-lifecycle.md` 与本文件 §7.6。
 
-### 11.7 修改内嵌文档
-
-```powershell
-# 1. 改 docs/*.md 或 README.md
-# 2. 若增删 CATALOG 条目，同步改 scripts/build-chinese-docs.py 与 test-chinese-pages.mjs 的数量断言
-python scripts/build-chinese-docs.py
-node --test scripts/test-chinese-pages.mjs
-cargo build -p samho        # 重新嵌入二进制
-```
-
-### 11.8 调整路由/模型角色
+### 11.7 调整路由/模型角色
 
 - 全局层级与评分：`RuntimeConfig.routing`。
 - 任务类型到模型的固定绑定：Web“模型”面板或 `PUT /api/model-roles`，落 `model_roles.json`。
@@ -1336,7 +1305,7 @@ cargo build -p samho        # 重新嵌入二进制
 8. **端口**：测试/fixture 只用 300–400；生产端口不限。
 9. **证据**：新功能先补 fixture/契约测试，再宣称“已实现”；区分“本地 fixture 验证”与“真实供应商/跨平台验收”。
 10. **文案**：用户可见中文；事件 kind、payload 键、配置键、日志键保持英文。
-11. **文档同步**：改 `docs/*.md` 后重跑生成器；改行为后更新本文件对应章节与 README。
+11. **文档同步**：改行为后更新本文件对应章节、README 与相关 docs 文档。
 12. **提交信息**：`类型: 中文摘要`（feat/fix/docs/test/ci/chore），与现有 git 历史一致。
 13. **不要提交**：`.samho/`、`target/`、`reports/` 生成物、`__pycache__/`、`.zcode/`。
 
@@ -1350,7 +1319,6 @@ cargo build -p samho        # 重新嵌入二进制
 | --- | --- | --- |
 | `server.rs` + `tui/mod.rs` | `PUT /api/ui` 写 `data_dir/ui.json`，启动时不回读 | 服务重启后主题/快捷键回到配置文件或默认值 |
 | `tui/mod.rs` | `/theme contrast` 被服务端拒绝 | 该命令返回 400 |
-| `scripts/test-chinese-browser.mjs` | 断言 13 篇文档，实际 12 篇；工作台 UI 断言仍针对旧版 DOM | 浏览器验收脚本无法通过；不在 CI |
 | `panels.rs::git_diff` | 按固定字节偏移截断 UTF-8 | 截断点落在多字节字符中间时可能 panic |
 | `anthropic.rs` 流式 | 无总字节/单帧/工具数上限 | 恶意或异常流可能占用过多内存 |
 | `GET /api/sessions/{id}/attachments` | 不校验会话存在 | 不存在的会话返回空默认值而非 404 |
@@ -1385,29 +1353,19 @@ cargo build -p samho        # 重新嵌入二进制
 | MCP server 显示 failed | 检查 command/url、启动超时、`scrub_env` 是否误删所需变量；单个失败不阻塞其他 server |
 | Facet 启动失败 | `AgentRuntime::build` 会失败；检查 endpoint、token env、能力白名单、HTTPS/回环设置 |
 | `cargo test` 卡住 | MCP stdio 测试需要 Python 3；PTY 测试在 Windows 上会启动真实 shell |
-| 文档契约失败 | 改过 `docs/*.md` 但没重跑 `build-chinese-docs.py`，或 CATALOG 数量与断言不一致 |
 | `CLAUDE.md` 无法创建软链接 | Windows 未开启开发者模式/非管理员；本仓库使用 `@agent.md` 导入回退（见 §14.4） |
 
 ---
 
 ## 14. 文档地图与维护规则
 
-### 14.1 文档中心内嵌的 12 篇
+### 14.1 文档清单
 
-| 分类 | 文档 |
-| --- | --- |
-| 开始使用 | `docs/中文使用说明.md`、`docs/中文确认计划说明.md`、`README.md` |
-| 上游分析 | `docs/pi-analysis.md`、`docs/reference-analysis.md` |
-| 实现设计 | `docs/architecture.md`、`docs/customization.md`、`docs/mcp-support.md`、`docs/implementation-status.md`、`docs/remote-facets.md` |
-| 验证与交付 | `docs/validation-plan.md`、`docs/test-port-policy.md` |
-
-### 14.2 未内嵌的文档
-
-- `docs/frontend-refactor-analysis.md`
-- `docs/installation-tui.md`
-- `docs/plan-generator-integration.md`
-- `docs/provider-streaming.md`
-- `docs/storage-lifecycle.md`
+- 开始使用：`docs/中文使用说明.md`、`README.md`
+- 上游分析：`docs/pi-analysis.md`、`docs/reference-analysis.md`
+- 实现设计：`docs/architecture.md`、`docs/customization.md`、`docs/mcp-support.md`、`docs/implementation-status.md`、`docs/remote-facets.md`
+- 验证与交付：`docs/validation-plan.md`、`docs/test-port-policy.md`
+- 其他：`docs/frontend-refactor-analysis.md`、`docs/installation-tui.md`、`docs/provider-streaming.md`、`docs/storage-lifecycle.md`
 
 ### 14.3 权威顺序
 

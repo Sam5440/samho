@@ -1,4 +1,4 @@
-// 工作台回归契约（静态断言，风格与 test-chinese-pages.mjs 一致）：
+// 工作台回归契约（静态断言）：
 // React + shadcn/ui 前端（web/app）下，轨迹搜索不得经 HTML 注入；live 正文不进 aria-live；
 // 移动端侧栏抽屉可达；工作区切换代际守卫与任务提交锁存在；构建产物满足 CSP。
 import assert from 'node:assert/strict';

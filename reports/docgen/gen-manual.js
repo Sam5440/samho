@@ -52,7 +52,7 @@ body.push(H.h2("2.2 三界面一运行时"));
 body.push(H.p("serve 进程是整个系统唯一的执行体。Web 工作台（浏览器）、Ratatui TUI（终端）与 CLI 工具（run/inspect/replay）都是这个进程的客户端。这带来两个直接好处：一是界面切换不丢状态——网页上提交的任务在 TUI 里同步可见；二是调试口径统一——所有界面看到的行为都由同一份日志解释。"));
 body.push(...H.figure(S("30-workbench-home-new.png"), "Web 工作台与 TUI 共用同一运行时：图为工作台首页三栏布局"));
 body.push(H.h2("2.3 内嵌前端与静态资源"));
-body.push(H.p("Web 工作台源码在 web/app（React 19 + TypeScript + Vite 8 + Tailwind v4 + shadcn/ui），构建产物输出到 web/dist 并以 include_str! 方式内嵌进二进制——发布形态就是一个 samho.exe，没有任何外部静态文件依赖。静态资源表 STATIC_ASSETS 共 6 项（含 SPA 入口、文档中心 docs.html、确认计划 plan.html）。服务端启用严格 CSP（style-src 与 script-src 均为 self），前端不得内联脚本或样式；修改前端后必须重新构建并提交 web/dist，再重新编译 Rust，旧 web 目录删除与新前端切换必须在同一提交里完成（CI 有产物同步门禁）。"));
+body.push(H.p("Web 工作台源码在 web/app（React 19 + TypeScript + Vite 8 + Tailwind v4 + shadcn/ui），构建产物输出到 web/dist 并以 include_str! 方式内嵌进二进制——发布形态就是一个 samho.exe，没有任何外部静态文件依赖。静态资源表 STATIC_ASSETS 共 6 项（SPA 入口与产物、xterm 惰性加载资源）。服务端启用严格 CSP（style-src 与 script-src 均为 self），前端不得内联脚本或样式；修改前端后必须重新构建并提交 web/dist，再重新编译 Rust，旧 web 目录删除与新前端切换必须在同一提交里完成（CI 有产物同步门禁）。"));
 body.push(H.h2("2.4 一次任务的完整时序"));
 body.push(H.p("以演示实例中的一个真实任务（8f7ea2be，读取 README 并总结）为例，把从提交到落盘的每一步按时间顺序走一遍。这个任务全场最快，但链路与最复杂的任务完全一致。"));
 body.push(...H.numbered([
@@ -291,11 +291,7 @@ body.push(...H.figure(S("42-light-theme.png"), "亮色主题下的工作台全�
 body.push(H.h2("9.5 沙箱预览"));
 body.push(H.p("对话中的 HTML 代码块与 workspace 网页可在隔离沙箱运行：/api/preview 存储提交的 HTML，/api/preview/fs/{path} 以严格 CSP 提供 workspace 文件，预览页运行在受限源（Origin 为 null），无法访问服务 API 与用户凭据。目录请求自动 307 到 index.html，单文件上限 8 MiB。"));
 body.push(...H.figure(S("24-preview-hello-samho.png"), "沙箱预览示例：Agent 生成的 hello-samho.html"));
-body.push(H.h2("9.6 文档中心与确认计划"));
-body.push(...H.figure(S("45-docs-center.png"), "文档中心：12 份中文文档，支持标题/正文/配置项搜索"));
-body.push(...H.figure(S("46-plan-page.png"), "确认计划页：勾选生成计划文本，不自动执行"));
-body.push(H.p("确认计划页把「下一阶段做什么」变成显式契约：用户勾选目标、填写项目目标与执行边界，页面生成 UTF-8 文本文件；把该文本回传到对话后，Agent 才按确认范围实现。网页本身不调用 Agent 接口、不提交模型请求。"));
-body.push(H.h2("9.7 键盘快捷键总表"));
+body.push(H.h2("9.6 键盘快捷键总表"));
 body.push(...H.tbl({
   caption: "工作台快捷键（默认值，可在界面设置中修改）",
   headers: ["快捷键", "动作", "生效范围"],
@@ -443,7 +439,7 @@ body.push(...H.tbl({
   ],
   small: true,
 }));
-body.push(H.p("Node 侧 21 项测试覆盖中文页面（test-chinese-pages.mjs）与工作台契约（test-workbench-contracts.mjs），另有 check-web-esm.mjs 校验前端 ESM 规范。测试全部使用本地 fixture，无需供应商凭证。"));
+body.push(H.p("Node 侧 12 项测试覆盖工作台契约（test-workbench-contracts.mjs），另有 check-web-esm.mjs 校验前端 ESM 规范。测试全部使用本地 fixture，无需供应商凭证。"));
 body.push(H.h2("14.2 验收脚本"));
 body.push(...H.codeBlock([
   "powershell -NoProfile -File scripts/smoke-web.ps1 -Force        # 浏览器验收",
@@ -467,7 +463,7 @@ body.push(...H.codeBlock([
   "cargo test --workspace mcp          # 按关键字过滤测试名",
   "cargo test --workspace -- --nocapture  # 显示测试输出",
   "npm --prefix web/app run build      # 前端改动后先构建",
-  "node --test scripts/test-chinese-pages.mjs",
+  "node --test scripts/test-workbench-contracts.mjs",
 ]));
 body.push(H.p("约定：新增 Rust 代码需要同步补充对应测试组的用例；修改前端必须重新构建 web/dist 并一并提交（CI 门禁检查产物一致性）；测试一律使用本地 fixture，不允许依赖外部网络与供应商凭证。"));
 
@@ -583,7 +579,6 @@ body.push(...H.tbl({
     ["docs/implementation-status.md", "实现状态与边界"],
     ["docs/mcp-support.md", "MCP 能力矩阵"],
     ["docs/中文使用说明.md", "中文启动/操作/复盘指南"],
-    ["docs/中文确认计划说明.md", "/plan 的使用规则"],
     ["docs/upstream-lock.json", "上游参考固定提交"],
     ["web/app / web/dist", "前端源码与内嵌构建产物"],
     ["scripts/", "验收与基准脚本"],

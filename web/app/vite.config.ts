@@ -39,8 +39,6 @@ export default defineConfig({
       '/api': { target, changeOrigin: false },
       '/vendor': { target },
       '/w/': { target },
-      '/docs': { target },
-      '/plan': { target },
     },
   },
 });

@@ -74,9 +74,7 @@ def main():
                 state = request(base, "/api/state")
                 assert state["service"] == "samho"
                 assert state["simulation"] is True
-                assert "中文" in request(base, "/docs")
-                assert "确认" in request(base, "/plan")
-                checks.append("中文文档/计划入口与模拟状态")
+                checks.append("模拟模式状态校验")
                 task = request(base, "/api/run", {"prompt": "hello smoke test", "profile": {"complexity": 2, "automatic": False}, "skills": []})
                 deadline = time.monotonic() + 15
                 while True:

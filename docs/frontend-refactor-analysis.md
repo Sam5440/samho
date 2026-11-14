@@ -142,7 +142,7 @@
 | `SessionStore::delete_cascade` | session.rs | 收集目标会话 + parent_id 传递闭包后代；运行中拒绝；用 `backend.replace` 把保留会话重写为全量快照 delta 序列（复用 legacy 迁移机制），重建内存 |
 | `PATCH /api/sessions/{id}` `{title?, archived?}` | server.rs | 校验 title 非空 ≤200 字符 |
 | `DELETE /api/sessions/{id}` | server.rs | 级联 fork 后代，409 保护运行中会话 |
-| 静态资源白名单 | server.rs | `/ui/tokens.css` `/ui/base.css` `/ui/components.css` `/app.css` `/js/*.js`（含 mime 表），保留 `/docs` `/plan` 资源 |
+| 静态资源白名单 | server.rs | `/ui/tokens.css` `/ui/base.css` `/ui/components.css` `/app.css` `/js/*.js`（含 mime 表） |
 | 删除旧 `/style.css` `/app.js` `/chinese.css` 路由与文件（已完成） | server.rs / web/ | index.html 不再引用，文件已移除 |
 
 不改动执行循环与事件 schema（轨迹内容受 `log_content` 开关控制——关闭时轨迹 CallCard 显示元数据 + omitted 提示，主时间线始终用持久化会话消息渲染完整工具调用）。

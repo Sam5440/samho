@@ -13,7 +13,7 @@ cargo build --release --locked -p samho
 
 Windows 可执行文件为 target/release/samho.exe；Linux/macOS 为 target/release/samho。SQLite 采用 bundled SQLite，无需用户安装独立数据库。Windows 需要 Rust 的 MSVC 构建工具，Linux 需要系统 C 编译器，macOS 需要 Xcode 命令行工具。
 
-MCP Python 样例测试需要 Python 3，中文网页契约需要 Node 22；这些不是模型供应商凭据。TUI 额外依赖 pulldown-cmark、syntect（纯 Rust fancy-regex 后端）与 webbrowser，均为 MIT/Apache 许可并锁进 Cargo.lock。
+MCP Python 样例测试需要 Python 3，网页工作台契约需要 Node 22；这些不是模型供应商凭据。TUI 额外依赖 pulldown-cmark、syntect（纯 Rust fancy-regex 后端）与 webbrowser，均为 MIT/Apache 许可并锁进 Cargo.lock。
 
 ## 中文命令行与动态层级
 
@@ -62,10 +62,10 @@ Shift+Enter 插入换行。Ctrl+C 取消运行任务或在空闲时退出。
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
-node --test scripts/test-chinese-pages.mjs
+node --test scripts/test-workbench-contracts.mjs
 python scripts/smoke_runtime.py --binary target/release/samho
 ~~~
 
-.github/workflows/ci.yml 配置 Linux、macOS 和 Windows 三平台，执行 Rust 测试、静态检查、中文网页契约、发布构建及真实本地服务冒烟，保留 reports/ci-smoke.json。冒烟脚本使用临时目录、随机回环端口和明确模拟模型，不调用收费供应商。
+.github/workflows/ci.yml 配置 Linux、macOS 和 Windows 三平台，执行 Rust 测试、静态检查、网页工作台契约、发布构建及真实本地服务冒烟，保留 reports/ci-smoke.json。冒烟脚本使用临时目录、随机回环端口和明确模拟模型，不调用收费供应商。
 
 当前仅在本机实际运行过的命令能标为通过；添加 workflow 文件不等于 GitHub 上的三平台 CI 已运行，更不等于真实终端像素一致性、供应商模型质量或完整 MCP conformance 已通过。TUI TestBackend 覆盖窗口大小、CJK、组合字符、emoji 布局、Markdown 渲染、SSE 解析与各视图键位（Rust 测试 201 项），但实际终端仍需独立 PTY 验收——尤其 Windows Terminal/ConPTY 下的终端接管模式。
