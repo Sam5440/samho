@@ -1,4 +1,16 @@
-use std::{collections::VecDeque, io, time::Duration};
+//! TUI：`samho tui --url` 连接运行中的 `samho serve`（纯 HTTP/SSE 客户端）。
+//!
+//! 模块划分：`api` HTTP/SSE 封装、`sse` SSE 解析器、`markdown` Markdown
+//! 渲染器；视图自 M2 起按 views/ 子模块扩展。数据契约与 web 前端一致：
+//! 进度为 TaskProgress 累计快照（按 revision 整体替换），轨迹为 TraceEvent。
+
+mod api;
+mod markdown;
+mod sse;
+
+use std::collections::VecDeque;
+use std::io;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::{
@@ -9,13 +21,14 @@ use crossterm::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 const TIERS: [&str; 7] = [
     "auto",
@@ -55,6 +68,15 @@ struct App {
     progress: Value,
     workspaces: Vec<Value>,
     message_count: usize,
+    // SSE 连接态、局域网地址、事件游标与 Markdown 缓存
+    live_sse: bool,
+    trace_sse: bool,
+    lan: String,
+    last_event_seq: u64,
+    /// (宽度, 原文, 渲染结果) —— 流式进度正文
+    progress_md: Option<(u16, String, Vec<Line<'static>>)>,
+    /// (宽度, 原文, 渲染结果) —— 最后一条助手消息
+    assistant_md: Option<(u16, String, Vec<Line<'static>>)>,
 }
 
 enum Update {
@@ -64,20 +86,40 @@ enum Update {
     Finished(Value),
     Error(String),
     TaskError(String),
+    TraceEvent(Value),
+    Sse {
+        live: Option<bool>,
+        trace: Option<bool>,
+    },
     Resources {
         state: Value,
         models: Vec<Value>,
         sessions: Vec<Value>,
         objects: Vec<Value>,
         skills: Vec<Value>,
-        events: Vec<Value>,
         ui: Value,
         workspaces: Vec<Value>,
+        network: Value,
     },
     Session {
         value: Value,
         version: u64,
     },
+}
+
+/// 三个后台流（资源轮询 + 两条 SSE），切换工作区/退出时统一终止。
+struct Streams {
+    poller: JoinHandle<()>,
+    live: JoinHandle<()>,
+    trace: JoinHandle<()>,
+}
+
+impl Streams {
+    fn abort(&self) {
+        self.poller.abort();
+        self.live.abort();
+        self.trace.abort();
+    }
 }
 
 struct TerminalGuard;
@@ -86,21 +128,6 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
     }
-}
-
-async fn fetch(client: &reqwest::Client, url: &str, path: &str) -> Result<Value> {
-    let response = client.get(format!("{url}{path}")).send().await?;
-    let status = response.status();
-    let value: Value = response.json().await.context("服务返回了无效 API 响应")?;
-    anyhow::ensure!(
-        status.is_success(),
-        "{}",
-        value
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("API 请求失败")
-    );
-    Ok(value)
 }
 
 fn array(value: Value) -> Vec<Value> {
@@ -318,36 +345,32 @@ fn spawn_resources(
     client: &reqwest::Client,
     url: &str,
     sender: &mpsc::Sender<Update>,
-) -> tokio::task::JoinHandle<()> {
+) -> JoinHandle<()> {
     let resource_client = client.clone();
     let resource_url = url.to_owned();
     let resource_sender = sender.clone();
     tokio::spawn(async move {
-        let mut after = 0u64;
         loop {
             let result = async {
-                let events_path = format!("/api/events/page?after={after}&limit=500");
-                let (state, models, sessions, objects, skills, events, ui, workspaces) = tokio::try_join!(
-                    fetch(&resource_client, &resource_url, "/api/state"),
-                    fetch(&resource_client, &resource_url, "/api/models"),
-                    fetch(&resource_client, &resource_url, "/api/sessions"),
-                    fetch(&resource_client, &resource_url, "/api/objects"),
-                    fetch(&resource_client, &resource_url, "/api/skills"),
-                    fetch(&resource_client, &resource_url, &events_path),
-                    fetch(&resource_client, &resource_url, "/api/ui"),
-                    fetch(&resource_client, &resource_url, "/api/workspaces"),
+                let (state, models, sessions, objects, skills, ui, workspaces, network) = tokio::try_join!(
+                    api::fetch(&resource_client, &resource_url, "/api/state"),
+                    api::fetch(&resource_client, &resource_url, "/api/models"),
+                    api::fetch(&resource_client, &resource_url, "/api/sessions"),
+                    api::fetch(&resource_client, &resource_url, "/api/objects"),
+                    api::fetch(&resource_client, &resource_url, "/api/skills"),
+                    api::fetch(&resource_client, &resource_url, "/api/ui"),
+                    api::fetch(&resource_client, &resource_url, "/api/workspaces"),
+                    api::fetch(&resource_client, &resource_url, "/api/network"),
                 )?;
-                let events = array(events.get("events").cloned().unwrap_or(events));
-                for event in &events {
-                    after = after.max(event["sequence"].as_u64().unwrap_or(0));
-                }
                 Ok::<_, anyhow::Error>(Update::Resources {
                     state,
                     models: array(models),
                     sessions: array(sessions),
                     objects: array(objects),
                     skills: array(skills),
-                    events, ui, workspaces: array(workspaces),
+                    ui,
+                    workspaces: array(workspaces),
+                    network,
                 })
             }
             .await;
@@ -363,13 +386,22 @@ fn spawn_resources(
     })
 }
 
+fn spawn_streams(client: &reqwest::Client, url: &str, sender: &mpsc::Sender<Update>) -> Streams {
+    let sse = api::sse_client().expect("SSE 客户端构建失败");
+    Streams {
+        poller: spawn_resources(client, url, sender),
+        live: api::spawn_live_sse(sse.clone(), url.to_owned(), sender.clone()),
+        trace: api::spawn_trace_sse(sse, url.to_owned(), sender.clone()),
+    }
+}
+
 pub async fn run(url: &str) -> Result<()> {
     let mut url = url.trim_end_matches('/').to_owned();
     let root_url = url.clone();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()?;
-    fetch(&client, &url, "/api/health")
+    api::fetch(&client, &url, "/api/health")
         .await
         .context("无法连接运行时，请先启动 samho serve")?;
     enable_raw_mode()?;
@@ -382,7 +414,7 @@ pub async fn run(url: &str) -> Result<()> {
         status: format!("已连接 {url}"),
         ..App::default()
     };
-    let mut poller = spawn_resources(&client, &url, &sender);
+    let mut streams = spawn_streams(&client, &url, &sender);
     let mut tick = tokio::time::interval(Duration::from_millis(33));
     let result = async {
         loop {
@@ -390,6 +422,7 @@ pub async fn run(url: &str) -> Result<()> {
             while let Ok(update) = receiver.try_recv() {
                 apply_update(&mut app, update);
             }
+            refresh_markdown_cache(&mut app, transcript_width(&terminal));
             terminal.draw(|frame| render(frame, &app))?;
             while event::poll(Duration::ZERO)? {
                 let Event::Key(key) = event::read()? else {
@@ -479,12 +512,12 @@ pub async fn run(url: &str) -> Result<()> {
                                 .position(|candidate| candidate == &url)
                                 .map_or(0, |i| (i + 1) % choices.len());
                             url = choices[next].clone();
-                            poller.abort();
+                            streams.abort();
                             app = App {
                                 status: format!("切换至 {url}"),
                                 ..Default::default()
                             };
-                            poller = spawn_resources(&client, &url, &sender);
+                            streams = spawn_streams(&client, &url, &sender);
                         }
                     }
                     KeyCode::F(2) => app.tier = (app.tier + 1) % tier_names(&app).len(),
@@ -513,7 +546,7 @@ pub async fn run(url: &str) -> Result<()> {
                             let url = url.clone();
                             let sender = sender.clone();
                             tokio::spawn(async move {
-                                let update = match fetch(
+                                let update = match api::fetch(
                                     &client,
                                     &url,
                                     &format!("/api/sessions/{session_id}"),
@@ -546,10 +579,66 @@ pub async fn run(url: &str) -> Result<()> {
         }
     }
     .await;
-    poller.abort();
+    streams.abort();
     drop(terminal);
     drop(guard);
     result
+}
+
+/// 对话中列的可用文本宽度（与 render 的布局约束保持一致）。
+fn transcript_width(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> u16 {
+    let size = terminal.size().unwrap_or_default();
+    let area = Rect::new(0, 0, size.width, size.height);
+    let columns = Layout::horizontal([
+        Constraint::Percentage(22),
+        Constraint::Percentage(51),
+        Constraint::Percentage(27),
+    ])
+    .split(area);
+    columns[1].width.saturating_sub(2).max(1)
+}
+
+/// 按当前宽度与原文重建 Markdown 缓存（原文未变则复用；流式增量整体重渲，
+/// 与 web 前端「按 revision 整体替换」的语义一致）。
+fn refresh_markdown_cache(app: &mut App, width: u16) {
+    let md = markdown_palette(app);
+    if let Some(text) = app.progress["text"].as_str() {
+        let rebuild = app
+            .progress_md
+            .as_ref()
+            .is_none_or(|(cached_width, cached_text, _)| {
+                *cached_width != width || cached_text != text
+            });
+        if rebuild {
+            let lines = markdown::render(text, &md, width);
+            app.progress_md = Some((width, text.to_owned(), lines));
+        }
+    } else {
+        app.progress_md = None;
+    }
+    if let Some((_, content)) = app
+        .messages
+        .iter()
+        .rev()
+        .find(|(role, _)| role == "assistant")
+    {
+        let rebuild = app
+            .assistant_md
+            .as_ref()
+            .is_none_or(|(cached_width, cached_text, _)| {
+                *cached_width != width || cached_text != content
+            });
+        if rebuild {
+            let lines = markdown::render(content, &md, width);
+            app.assistant_md = Some((width, content.clone(), lines));
+        }
+    } else {
+        app.assistant_md = None;
+    }
+}
+
+fn markdown_palette(app: &App) -> markdown::MarkdownPalette {
+    markdown::MarkdownPalette::from_theme(app.ui["theme"].as_str().unwrap_or("dark"))
 }
 
 fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc::Sender<Update>) {
@@ -570,6 +659,7 @@ fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc
             let id = value["task_id"].as_str().context("提交响应缺少 task_id")?;
             sender.send(Update::Submitted(id.to_owned())).await?;
             loop {
+                // 兜底轮询：SSE 丢帧时仍能收尾（进度实时性由 /api/live/stream 保证）
                 let response = match client.get(format!("{url}/api/tasks/{id}")).send().await {
                     Ok(response) => response,
                     Err(error) => {
@@ -594,7 +684,7 @@ fn spawn_task(client: reqwest::Client, url: String, request: Value, sender: mpsc
                     sender.send(Update::Finished(value)).await?;
                     return Ok::<_, anyhow::Error>(());
                 }
-                tokio::time::sleep(Duration::from_millis(250)).await;
+                tokio::time::sleep(Duration::from_millis(900)).await;
             }
         }
         .await;
@@ -646,15 +736,34 @@ fn apply_update(app: &mut App, update: Update) {
             app.status = error.clone();
             app.messages.push(("error".into(), error));
         }
+        Update::TraceEvent(event) => {
+            let sequence = event["sequence"].as_u64().unwrap_or(0);
+            if sequence <= app.last_event_seq {
+                return; // SSE 回放与轮询兜底的重复帧
+            }
+            app.last_event_seq = sequence;
+            app.events.push_back(event);
+            while app.events.len() > 300 {
+                app.events.pop_front();
+            }
+        }
+        Update::Sse { live, trace } => {
+            if let Some(live) = live {
+                app.live_sse = live;
+            }
+            if let Some(trace) = trace {
+                app.trace_sse = trace;
+            }
+        }
         Update::Resources {
             state,
             models,
             sessions,
             objects,
             skills,
-            events,
             ui,
             workspaces,
+            network,
         } => {
             app.ui = ui;
             app.workspaces = workspaces;
@@ -674,12 +783,13 @@ fn apply_update(app: &mut App, update: Update) {
             }
             app.objects = objects;
             app.skills = skills;
-            for event in events {
-                app.events.push_back(event);
-            }
-            while app.events.len() > 300 {
-                app.events.pop_front();
-            }
+            let address = network["addresses"]
+                .as_array()
+                .and_then(|addresses| addresses.first())
+                .and_then(Value::as_str)
+                .unwrap_or("未检测到局域网地址");
+            let port = network["port"].as_u64().unwrap_or(7432);
+            app.lan = format!("{address}:{port}");
             if app.selected_model > app.models.len() {
                 app.selected_model = 0;
             }
@@ -800,7 +910,10 @@ fn render(frame: &mut Frame, app: &App) {
         columns[0],
     );
     let mut transcript = vec![
-        Line::styled("共享 Rust 服务 · 支持取消", Style::default().fg(muted)),
+        Line::styled(
+            "共享 Rust 服务 · SSE 流式 · Markdown 渲染",
+            Style::default().fg(muted),
+        ),
         Line::raw(""),
     ];
     for (role, content) in &app.messages {
@@ -816,7 +929,17 @@ fn render(frame: &mut Frame, app: &App) {
                 })
                 .add_modifier(Modifier::BOLD),
         ));
-        transcript.extend(content.lines().map(|line| Line::raw(line.to_owned())));
+        // 助手消息走 Markdown 渲染；其余角色保持原文
+        if role == "assistant" {
+            match &app.assistant_md {
+                Some((_, cached_text, lines)) if cached_text == content => {
+                    transcript.extend(lines.iter().cloned());
+                }
+                _ => transcript.extend(content.lines().map(|line| Line::raw(line.to_owned()))),
+            }
+        } else {
+            transcript.extend(content.lines().map(|line| Line::raw(line.to_owned())));
+        }
         transcript.push(Line::raw(""));
     }
     if !app.progress.is_null() {
@@ -824,15 +947,28 @@ fn render(frame: &mut Frame, app: &App) {
             "正在生成（累计脱敏快照）",
             Style::default().fg(accent),
         ));
-        for field in ["reasoning", "text"] {
-            if let Some(text) = app.progress[field].as_str() {
-                transcript.extend(text.lines().map(|line| Line::raw(line.to_owned())));
+        if let Some(reasoning) = app.progress["reasoning"].as_str() {
+            transcript.extend(
+                reasoning
+                    .lines()
+                    .map(|line| Line::styled(line.to_owned(), Style::default().fg(muted))),
+            );
+        }
+        if let Some(text) = app.progress["text"].as_str() {
+            match &app.progress_md {
+                Some((_, cached_text, lines)) if cached_text == text => {
+                    transcript.extend(lines.iter().cloned());
+                }
+                _ => transcript.extend(text.lines().map(|line| Line::raw(line.to_owned()))),
             }
         }
         if let Some(calls) = app.progress["tool_calls"].as_array()
             && !calls.is_empty()
         {
-            transcript.push(Line::raw(format!("?????{}", calls.len())));
+            transcript.push(Line::styled(
+                format!("🔧 工具调用 ×{}", calls.len()),
+                Style::default().fg(muted),
+            ));
         }
     }
     if app.messages.is_empty() {
@@ -904,7 +1040,30 @@ fn render(frame: &mut Frame, app: &App) {
         Paragraph::new(app.status.as_str()).style(Style::default().fg(accent)),
         rows[3],
     );
-    frame.render_widget(Paragraph::new(format!("Ctrl+Q 退出  {} 提交  {} 新建  {} 取消  F2 层级 F3 模型 F4 会话 F6 技能 F7 工作区 Tab 检查", binding(app,"submit_key","Ctrl+Enter"), binding(app,"new_session_key","Alt+N"), binding(app,"cancel_key","Ctrl+K"))).style(Style::default().fg(muted)), rows[4]);
+    let dot = |on: bool| {
+        Span::styled(
+            if on { "●" } else { "○" },
+            Style::default().fg(if on { Color::Green } else { Color::Red }),
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("流 "),
+            dot(app.live_sse),
+            dot(app.trace_sse),
+            Span::raw(format!("  LAN {}  ", app.lan)),
+            Span::styled(
+                format!(
+                    "Ctrl+Q 退出  {} 提交  {} 新建  {} 取消  F2 层级 F3 模型 F4 会话 F6 技能 F7 工作区 Tab 检查",
+                    binding(app, "submit_key", "Ctrl+Enter"),
+                    binding(app, "new_session_key", "Alt+N"),
+                    binding(app, "cancel_key", "Ctrl+K")
+                ),
+                Style::default().fg(muted),
+            ),
+        ])),
+        rows[4],
+    );
     if rows[2].width > 2 && rows[2].height > 2 {
         let input_width = usize::from(rows[2].width - 2);
         let cursor = Line::raw(app.input.lines().last().unwrap_or(""))
@@ -1059,5 +1218,69 @@ mod tests {
                 usize::from(width) * usize::from(height)
             );
         }
+    }
+
+    #[test]
+    fn sse_trace_events_dedupe_by_sequence_and_resource_update_shows_lan() {
+        let mut app = App::default();
+        for sequence in [1u64, 2, 3, 2, 1] {
+            apply_update(
+                &mut app,
+                Update::TraceEvent(json!({"sequence":sequence,"kind":"tool.start"})),
+            );
+        }
+        assert_eq!(app.events.len(), 3);
+        assert_eq!(app.last_event_seq, 3);
+        apply_update(
+            &mut app,
+            Update::Resources {
+                state: json!({}),
+                models: vec![],
+                sessions: vec![],
+                objects: vec![],
+                skills: vec![],
+                ui: json!({}),
+                workspaces: vec![],
+                network: json!({"addresses":["192.168.1.8","10.0.0.2"],"port":7432}),
+            },
+        );
+        assert_eq!(app.lan, "192.168.1.8:7432");
+        apply_update(
+            &mut app,
+            Update::Sse {
+                live: Some(true),
+                trace: Some(false),
+            },
+        );
+        assert!(app.live_sse);
+        assert!(!app.trace_sse);
+    }
+
+    #[test]
+    fn assistant_markdown_cache_rebuilds_on_content_or_width_change() {
+        let mut app = App {
+            messages: vec![("assistant".into(), "# 标题\n\n- 甲".into())],
+            ..Default::default()
+        };
+        refresh_markdown_cache(&mut app, 60);
+        let lines = app.assistant_md.as_ref().unwrap();
+        assert_eq!(lines.0, 60);
+        assert!(
+            lines
+                .2
+                .iter()
+                .any(|line| line.spans.iter().any(|span| span.content.contains("标题")))
+        );
+        refresh_markdown_cache(&mut app, 40);
+        assert_eq!(app.assistant_md.as_ref().unwrap().0, 40);
+        app.progress = json!({"text":"**加粗**流式","revision":3});
+        refresh_markdown_cache(&mut app, 60);
+        let progress = app.progress_md.as_ref().unwrap();
+        assert!(progress.2.iter().any(|line| {
+            line.spans.iter().any(|span| {
+                span.content.contains("加粗")
+                    && span.style.has_modifier(ratatui::style::Modifier::BOLD)
+            })
+        }));
     }
 }
