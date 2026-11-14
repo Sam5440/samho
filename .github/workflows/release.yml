@@ -1,0 +1,102 @@
+name: 自动发布 Release
+
+# 每次 push 到 master 自动构建三平台 release 二进制并发布 GitHub Release；
+# 也可在 Actions 页面手动触发。构建后先跑真实服务冒烟，冒烟失败则不发布。
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: samho-x86_64-pc-windows-msvc.zip
+            crt_static: true
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: samho-x86_64-unknown-linux-gnu.tar.gz
+            crt_static: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: samho-aarch64-apple-darwin.tar.gz
+            crt_static: false
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.crt_static && '-C target-feature=+crt-static' || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master（stable）
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: 构建 release 二进制
+        run: cargo build --release --locked -p samho --target ${{ matrix.target }}
+      - name: 真实服务冒烟（独立数据目录，不访问真实模型）
+        run: python scripts/smoke_runtime.py --binary "target/${{ matrix.target }}/release/samho"
+      - name: 打包（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Copy-Item "target/${{ matrix.target }}/release/samho.exe" .
+          Compress-Archive -Path "samho.exe","README.md","LICENSE","examples" -DestinationPath "${{ matrix.archive }}"
+      - name: 打包（Linux / macOS）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cp "target/${{ matrix.target }}/release/samho" .
+          chmod +x samho
+          tar -czf "${{ matrix.archive }}" samho README.md LICENSE examples
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ matrix.archive }}
+          retention-days: 3
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: 生成 SHA256 校验和
+        run: |
+          cd dist
+          sha256sum -- *.zip *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: 计算发布标签
+        id: meta
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          TAG="v${VERSION}-build.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Samho v${{ steps.meta.outputs.version }} · build ${{ github.run_number }}
+          body_path: .github/releases/RELEASE_NOTES_TEMPLATE.md
+          files: dist/*
+          generate_release_notes: true
+          make_latest: "true"
